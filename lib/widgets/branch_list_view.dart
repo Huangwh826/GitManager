@@ -7,7 +7,6 @@ import '../models/git_models.dart';
 class BranchListView extends StatelessWidget {
   final List<GitBranch> branches;
   final Function(String) onBranchSelected;
-  /// (新增) 创建新分支的回调
   final Function(String) onCreateBranch;
 
   const BranchListView({
@@ -17,7 +16,6 @@ class BranchListView extends StatelessWidget {
     required this.onCreateBranch,
   });
 
-  /// 显示创建分支对话框的辅助方法
   void _showCreateBranchDialog(BuildContext context) {
     final TextEditingController controller = TextEditingController();
     showDialog(
@@ -61,7 +59,6 @@ class BranchListView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(8.0),
       children: [
-        // 本地分支部分 (添加了按钮)
         _buildSectionHeader(
           context,
           '本地分支',
@@ -72,12 +69,10 @@ class BranchListView extends StatelessWidget {
           ),
         ),
         ...localBranches.map((branch) => _buildBranchTile(context, branch)),
-
-        // 远程分支部分
         if (remoteBranches.isNotEmpty) ...[
           const SizedBox(height: 16),
           _buildSectionHeader(context, '远程'),
-          ...remoteBranches.map((branch) => _buildRemoteBranchGroup(context, branch, remoteBranches)),
+          Column(children: _buildRemoteBranchGroups(context, remoteBranches)),
         ]
       ],
     );
@@ -91,11 +86,7 @@ class BranchListView extends StatelessWidget {
         children: [
           Text(
             title.toUpperCase(),
-            style: TextStyle(
-              color: Colors.grey[500],
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: Colors.grey[500], fontWeight: FontWeight.bold, fontSize: 12),
           ),
           if (trailing != null) trailing,
         ],
@@ -104,64 +95,77 @@ class BranchListView extends StatelessWidget {
   }
 
   Widget _buildBranchTile(BuildContext context, GitBranch branch) {
-    return ListTile(
-      leading: Icon(
-        Icons.fork_right,
-        color: branch.isCurrent ? Colors.blueAccent : Colors.grey,
-        size: 18,
-      ),
-      title: Text(
-        branch.displayName,
-        style: TextStyle(
-          fontWeight: branch.isCurrent ? FontWeight.bold : FontWeight.normal,
-          color: branch.isCurrent ? Colors.white : Colors.grey[300],
+    // --- 核心修改：使用 GestureDetector 包裹 ListTile ---
+    return GestureDetector(
+      onDoubleTap: branch.isCurrent ? null : () => onBranchSelected(branch.name),
+      child: ListTile(
+        leading: Icon(
+          Icons.fork_right,
+          color: branch.isCurrent ? Colors.blueAccent : Colors.grey,
+          size: 18,
         ),
-        overflow: TextOverflow.ellipsis,
+        title: Text(
+          branch.displayName,
+          style: TextStyle(
+            fontWeight: branch.isCurrent ? FontWeight.bold : FontWeight.normal,
+            color: branch.isCurrent ? Colors.white : Colors.grey[300],
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: branch.upstreamInfo != null
+            ? Text(branch.upstreamInfo!, style: TextStyle(color: Colors.grey[600], fontSize: 11), overflow: TextOverflow.ellipsis)
+            : null,
+        dense: true,
+        selected: branch.isCurrent,
+        selectedTileColor: Colors.blue.withOpacity(0.2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        // onTap 留空或用于单击高亮等其他交互
+        onTap: () {},
       ),
-      subtitle: branch.upstreamInfo != null
-          ? Text(branch.upstreamInfo!, style: TextStyle(color: Colors.grey[600], fontSize: 11))
-          : null,
-      dense: true,
-      selected: branch.isCurrent,
-      selectedTileColor: Colors.blue.withOpacity(0.2),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      onTap: branch.isCurrent ? null : () => onBranchSelected(branch.name),
     );
+    // --- 修改结束 ---
   }
 
-  Widget _buildRemoteBranchGroup(BuildContext context, GitBranch branch, List<GitBranch> allRemotes) {
-    final remoteName = branch.name.split('/')[1];
-    final branchesForRemote = allRemotes.where((b) => b.name.contains('$remoteName/')).toList();
-
-    if (branch != branchesForRemote.first) {
-      return const SizedBox.shrink();
+  List<Widget> _buildRemoteBranchGroups(BuildContext context, List<GitBranch> remoteBranches) {
+    final groups = <String, List<GitBranch>>{};
+    for (var branch in remoteBranches) {
+      final parts = branch.name.split('/');
+      if (parts.length > 2) {
+        final remoteName = parts[1];
+        (groups[remoteName] ??= []).add(branch);
+      }
     }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-          child: Row(
-            children: [
-              Icon(Icons.cloud_queue, size: 16, color: Colors.grey[400]),
-              const SizedBox(width: 8),
-              Text(remoteName, style: TextStyle(color: Colors.grey[300])),
-            ],
+    return groups.entries.map((entry) {
+      final remoteName = entry.key;
+      final branchesForRemote = entry.value;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+            child: Row(
+              children: [
+                Icon(Icons.cloud_queue, size: 16, color: Colors.grey[400]),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(remoteName, style: TextStyle(color: Colors.grey[300]), overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(left: 24.0),
-          child: Column(
-            children: branchesForRemote.map((b) => ListTile(
-              leading: const Icon(Icons.fork_right, size: 16, color: Colors.grey),
-              title: Text(b.displayName, style: TextStyle(color: Colors.grey[400])),
-              dense: true,
-              onTap: () {},
-            )).toList(),
+          Padding(
+            padding: const EdgeInsets.only(left: 24.0),
+            child: Column(
+              children: branchesForRemote.map((b) => ListTile(
+                leading: const Icon(Icons.fork_right, size: 16, color: Colors.grey),
+                title: Text(b.displayName, style: TextStyle(color: Colors.grey[400]), overflow: TextOverflow.ellipsis),
+                dense: true,
+                onTap: () {},
+              )).toList(),
+            ),
           ),
-        ),
-      ],
-    );
+        ],
+      );
+    }).toList();
   }
 }

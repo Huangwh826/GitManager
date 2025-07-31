@@ -9,11 +9,13 @@ import 'diff_view.dart';
 class CommitDetailView extends StatefulWidget {
   final GitCommit commit;
   final GitService gitService;
+  final VoidCallback onClose;
 
   const CommitDetailView({
     super.key,
     required this.commit,
     required this.gitService,
+    required this.onClose,
   });
 
   @override
@@ -43,61 +45,69 @@ class _CommitDetailViewState extends State<CommitDetailView> {
         }
 
         final detail = snapshot.data!;
-        // 默认选中第一个文件
         if (_selectedFile == null && detail.files.isNotEmpty) {
           _selectedFile = detail.files.first;
         }
 
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        return Column(
           children: [
-            // 左侧：提交信息和文件列表
-            Container(
-              width: 350,
-              decoration: BoxDecoration(
-                border: Border(right: BorderSide(color: Colors.grey[800]!)),
+            AppBar(
+              title: const Text('提交详情'),
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: '返回工作区',
+                onPressed: widget.onClose,
               ),
-              // --- 核心修改部分 ---
-              child: Column(
+              backgroundColor: Colors.grey.withOpacity(0.1),
+              elevation: 0,
+            ),
+            Expanded(
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 将提交元数据包裹在 Flexible 和 SingleChildScrollView 中
-                  Flexible(
-                    flex: 1, // 分配一个灵活的比例
-                    child: SingleChildScrollView(
-                      child: _buildCommitMeta(context, detail),
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12.0, 12.0, 12.0, 4.0),
-                    child: Text('变更的文件 (${detail.files.length})', style: Theme.of(context).textTheme.titleSmall),
-                  ),
-                  // 文件列表将占据剩余的所有空间
                   Expanded(
-                    flex: 2, // 分配一个更大的比例
-                    child: ListView.builder(
-                      itemCount: detail.files.length,
-                      itemBuilder: (context, index) {
-                        final file = detail.files[index];
-                        return ListTile(
-                          title: Text(file.path, overflow: TextOverflow.ellipsis),
-                          dense: true,
-                          selected: _selectedFile?.path == file.path,
-                          onTap: () => setState(() => _selectedFile = file),
-                        );
-                      },
+                    flex: 2,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Flexible(
+                          flex: 1,
+                          child: SingleChildScrollView(
+                            child: _buildCommitMeta(context, detail),
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12.0, 12.0, 12.0, 4.0),
+                          child: Text('变更的文件 (${detail.files.length})', style: Theme.of(context).textTheme.titleSmall),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: ListView.builder(
+                            itemCount: detail.files.length,
+                            itemBuilder: (context, index) {
+                              final file = detail.files[index];
+                              return ListTile(
+                                title: Text(file.path, overflow: TextOverflow.ellipsis),
+                                dense: true,
+                                selected: _selectedFile?.path == file.path,
+                                onTap: () => setState(() => _selectedFile = file),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
+                  VerticalDivider(width: 1, thickness: 1, color: Colors.grey[800]),
+                  Expanded(
+                    flex: 3,
+                    child: _selectedFile != null
+                        ? DiffView(diffData: _selectedFile!.diffContent)
+                        : const Center(child: Text('没有文件变更')),
                   ),
                 ],
               ),
-              // --- 修改结束 ---
-            ),
-            // 右侧：差异视图
-            Expanded(
-              child: _selectedFile != null
-                  ? DiffView(diffData: _selectedFile!.diffContent)
-                  : const Center(child: Text('没有文件变更')),
             ),
           ],
         );
@@ -113,17 +123,30 @@ class _CommitDetailViewState extends State<CommitDetailView> {
         children: [
           SelectableText(detail.message, style: Theme.of(context).textTheme.bodyLarge),
           const SizedBox(height: 16),
+          // --- 核心修正部分 ---
           Row(
             children: [
-              const CircleAvatar(radius: 16), // Placeholder for author avatar
+              const CircleAvatar(radius: 16),
               const SizedBox(width: 8),
-              // 使用 Expanded 来防止长文本溢出
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(detail.author, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-                    Text(detail.date, style: Theme.of(context).textTheme.bodySmall),
+                    // 明确禁止换行并设置最大行数
+                    Text(
+                      detail.author,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                      maxLines: 1,
+                    ),
+                    Text(
+                      detail.date,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                      maxLines: 1,
+                    ),
                   ],
                 ),
               ),
@@ -131,6 +154,7 @@ class _CommitDetailViewState extends State<CommitDetailView> {
               SelectableText(detail.shortHash, style: const TextStyle(fontFamily: 'monospace')),
             ],
           ),
+          // --- 修正结束 ---
         ],
       ),
     );

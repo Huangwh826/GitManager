@@ -10,7 +10,7 @@ class MainFlutterWindow: NSWindow {
 
     // --- 核心修改: 设置并居中窗口 ---
     // 1. 定义一个标准的 16:9 窗口尺寸
-    let windowSize = NSSize(width: 1000, height: 1200)
+    let windowSize = NSSize(width: 1440, height: 1200)
     
     // 2. 获取主屏幕的尺寸
     if let mainScreen = NSScreen.main {
@@ -23,7 +23,7 @@ class MainFlutterWindow: NSWindow {
         self.setFrame(windowFrame, display: true)
     } else {
         // 如果无法获取屏幕信息，则使用一个默认尺寸
-        self.setFrame(NSRect(x: 0, y: 0, width: 1000, height: 1200), display: true)
+        self.setFrame(NSRect(x: 0, y: 0, width: 1440, height: 1200), display: true)
     }
     // --- 修改结束 ---
 

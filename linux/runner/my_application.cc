@@ -49,7 +49,7 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "GitManager");
   }
 
-  gtk_window_set_default_size(window, 1000, 1200);
+  gtk_window_set_default_size(window, 1440, 1200);
   gtk_widget_show(GTK_WIDGET(window));
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
