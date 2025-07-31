@@ -1,6 +1,7 @@
 // lib/main.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'dart:io';
 import 'package:multi_split_view/multi_split_view.dart';
@@ -248,18 +249,15 @@ class RepositoryDetailView extends StatefulWidget {
 class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   late GitService _gitService;
   Future<RepoDetailState>? _repoStateFuture;
-  GitFileStatus? _selectedFileForDiff;
-  Future<String>? _diffFuture;
+  GitFileStatus? _activeDiffFile;
   bool _isLoadingAction = false;
   GitCommit? _selectedCommit;
 
   MultiSplitViewController? _mainController;
   MultiSplitViewController? _workingCopyController;
-  MultiSplitViewController? _stagingController;
   MultiSplitViewController? _commitDetailController;
 
   bool _controllersInitialized = false;
-  // --- 新增状态标记 ---
   bool _isFirstLayoutDone = false;
 
   @override
@@ -293,15 +291,8 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
     _workingCopyController = MultiSplitViewController(
       areas: [
-        Area(weight: 0.6, minimalSize: 300),
-        Area(weight: 0.4, minimalSize: rightPanelMinWidth),
-      ],
-    );
-
-    _stagingController = MultiSplitViewController(
-      areas: [
         Area(weight: 0.5, minimalSize: 300),
-        Area(weight: 0.5, minimalSize: 300),
+        Area(weight: 0.5, minimalSize: rightPanelMinWidth),
       ],
     );
 
@@ -313,16 +304,12 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
     );
 
     _controllersInitialized = true;
-
-    // --- 移除此处的刷新逻辑，因为它执行得太早 ---
-    // WidgetsBinding.instance.addPostFrameCallback((_) { ... });
   }
 
   @override
   void dispose() {
     _mainController?.dispose();
     _workingCopyController?.dispose();
-    _stagingController?.dispose();
     _commitDetailController?.dispose();
     super.dispose();
   }
@@ -346,11 +333,9 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
   void _refreshAll() {
     setState(() {
-      // --- 核心修正：重置布局完成标记 ---
       _isFirstLayoutDone = false;
       _repoStateFuture = _gitService.getFullRepoState();
-      _selectedFileForDiff = null;
-      _diffFuture = null;
+      _activeDiffFile = null;
       _selectedCommit = null;
     });
   }
@@ -395,7 +380,13 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   );
 
   Future<void> _handleCommit(String message) async => _runGitAction(
-        () => _gitService.commit(message).then((_) => _refreshAll()),
+        () => _gitService.commit(message).then((_) {
+      _refreshAll();
+      // 提交后自动关闭差异视图
+      setState(() {
+        _activeDiffFile = null;
+      });
+    }),
     successMessage: '提交成功！',
   );
 
@@ -411,13 +402,15 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
   void _onFileSelectedInWorkingCopy(GitFileStatus file) {
     setState(() {
-      _selectedFileForDiff = file;
-      _diffFuture = _gitService.getDiff(file.path, isStaged: file.isStaged);
+      _activeDiffFile = file;
     });
   }
 
   void _onCommitSelected(GitCommit commit) {
-    setState(() => _selectedCommit = commit);
+    setState(() {
+      _selectedCommit = commit;
+      _activeDiffFile = null; // 查看提交详情时，关闭文件差异视图
+    });
   }
 
   void _onCloseCommitDetail() {
@@ -426,75 +419,86 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<RepoDetailState>(
-      future: _repoStateFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    return Column(
+      children: [
+        RepoActionsToolbar(
+          isLoading: _isLoadingAction,
+          onFetch: _handleFetch,
+          onPull: _handlePull,
+          onPush: _handlePush,
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: FutureBuilder<RepoDetailState>(
+            future: _repoStateFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-        // --- 核心修正：在组件真实构建后触发布局刷新 ---
-        if (snapshot.hasData && !_isFirstLayoutDone) {
-          _isFirstLayoutDone = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              _mainController?.notifyListeners();
-              _workingCopyController?.notifyListeners();
-              _stagingController?.notifyListeners();
-              _commitDetailController?.notifyListeners();
-            }
-          });
-        }
+              if (snapshot.hasData && !_isFirstLayoutDone) {
+                _isFirstLayoutDone = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    _mainController?.notifyListeners();
+                    _workingCopyController?.notifyListeners();
+                    _commitDetailController?.notifyListeners();
+                  }
+                });
+              }
 
-        if (snapshot.hasError) {
-          if (snapshot.error is GitCommandException &&
-              (snapshot.error as GitCommandException).message == '这不是一个 Git 仓库。') {
-            return NonGitRepositoryView(
-              repoPath: widget.repoPath,
-              onInit: () => _runGitAction(
-                    () => _gitService.initRepository().then((_) => _refreshAll()),
-                successMessage: '仓库初始化成功！',
-              ),
-            );
-          }
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                '加载仓库失败: ${snapshot.error}',
-                style: const TextStyle(color: Colors.red),
-              ),
-            ),
-          );
-        }
-        if (!snapshot.hasData) return const Center(child: Text('没有数据'));
+              if (snapshot.hasError) {
+                if (snapshot.error is GitCommandException &&
+                    (snapshot.error as GitCommandException).message == '这不是一个 Git 仓库。') {
+                  return NonGitRepositoryView(
+                    repoPath: widget.repoPath,
+                    onInit: () => _runGitAction(
+                          () => _gitService.initRepository().then((_) => _refreshAll()),
+                      successMessage: '仓库初始化成功！',
+                    ),
+                  );
+                }
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text(
+                      '加载仓库失败: ${snapshot.error}',
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  ),
+                );
+              }
+              if (!snapshot.hasData) return const Center(child: Text('没有数据'));
 
-        final state = snapshot.data!;
+              final state = snapshot.data!;
 
-        if (!_controllersInitialized || _mainController == null) {
-          return const Center(child: CircularProgressIndicator());
-        }
+              if (!_controllersInitialized || _mainController == null) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-        return MultiSplitView(
-          controller: _mainController!,
-          children: [
-            BranchListView(
-              branches: state.branches,
-              onBranchSelected: _handleSwitchBranch,
-              onCreateBranch: _handleCreateBranch,
-            ),
-            if (_selectedCommit == null)
-              _buildWorkingCopyView(state)
-            else
-              _buildCommitDetailView(state, _selectedCommit!),
-          ],
-        );
-      },
+              return MultiSplitView(
+                controller: _mainController!,
+                children: [
+                  BranchListView(
+                    branches: state.branches,
+                    onBranchSelected: _handleSwitchBranch,
+                    onCreateBranch: _handleCreateBranch,
+                  ),
+                  if (_selectedCommit == null)
+                    _buildWorkingCopyView(state)
+                  else
+                    _buildCommitDetailView(state, _selectedCommit!),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildWorkingCopyView(RepoDetailState state) {
-    if (_workingCopyController == null || _stagingController == null) {
+    if (_workingCopyController == null) {
       return const Center(child: CircularProgressIndicator());
     }
 
@@ -502,54 +506,35 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
       axis: Axis.horizontal,
       controller: _workingCopyController!,
       children: [
-        CommitHistoryView(
-          commits: state.commits,
-          onCommitSelected: _onCommitSelected,
-        ),
-        MultiSplitView(
-          axis: Axis.vertical,
-          controller: _stagingController!,
-          children: [
-            Container(
-              decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: Colors.grey, width: 0.5)),
-              ),
-              child: StagingAreaView(
-                allFiles: state.fileStatus,
-                onStage: _handleStageFile,
-                onUnstage: _handleUnstageFile,
-                onFileSelected: _onFileSelectedInWorkingCopy,
-                onCommit: _handleCommit,
-                selectedFile: _selectedFileForDiff,
-              ),
-            ),
-            Container(
-              decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: Colors.grey, width: 0.5)),
-              ),
-              child: FutureBuilder<String>(
-                future: _diffFuture,
-                builder: (context, diffSnapshot) {
-                  if (_selectedFileForDiff == null) {
-                    return const Center(
-                      child: Text('选择一个文件以查看差异'),
-                    );
-                  }
-                  if (diffSnapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (diffSnapshot.hasError) {
-                    return Center(
-                      child: Text('加载差异失败: ${diffSnapshot.error}'),
-                    );
-                  }
-                  return DiffView(
-                    diffData: diffSnapshot.data ?? '',
-                  );
-                },
-              ),
-            ),
-          ],
+        if (_activeDiffFile != null)
+          FileDiffView(
+            key: ValueKey(_activeDiffFile!.path + _activeDiffFile!.isStaged.toString()),
+            gitService: _gitService,
+            allFiles: state.fileStatus,
+            initialFile: _activeDiffFile!,
+            onClose: () {
+              setState(() {
+                _activeDiffFile = null;
+              });
+            },
+            onFileChanged: (newFile) {
+              setState(() {
+                _activeDiffFile = newFile;
+              });
+            },
+          )
+        else
+          CommitHistoryView(
+            commits: state.commits,
+            onCommitSelected: _onCommitSelected,
+          ),
+        StagingAreaView(
+          allFiles: state.fileStatus,
+          onStage: _handleStageFile,
+          onUnstage: _handleUnstageFile,
+          onFileSelected: _onFileSelectedInWorkingCopy,
+          onCommit: _handleCommit,
+          selectedFile: _activeDiffFile,
         ),
       ],
     );
@@ -579,6 +564,64 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   }
 }
 
+/// 一个包含主要 Git 操作按钮的工具栏 Widget。
+class RepoActionsToolbar extends StatelessWidget {
+  final bool isLoading;
+  final VoidCallback onFetch;
+  final VoidCallback onPull;
+  final VoidCallback onPush;
+
+  const RepoActionsToolbar({
+    super.key,
+    required this.isLoading,
+    required this.onFetch,
+    required this.onPull,
+    required this.onPush,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+      color: Theme.of(context).appBarTheme.backgroundColor?.withOpacity(0.5),
+      child: Row(
+        children: [
+          TextButton.icon(
+            icon: const Icon(Icons.download, size: 16),
+            label: const Text('抓取'),
+            onPressed: isLoading ? null : onFetch,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              disabledForegroundColor: Colors.grey,
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton.icon(
+            icon: const Icon(Icons.arrow_downward, size: 16),
+            label: const Text('拉取'),
+            onPressed: isLoading ? null : onPull,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              disabledForegroundColor: Colors.grey,
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton.icon(
+            icon: const Icon(Icons.arrow_upward, size: 16),
+            label: const Text('推送'),
+            onPressed: isLoading ? null : onPush,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              disabledForegroundColor: Colors.grey,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
 class NonGitRepositoryView extends StatelessWidget {
   final String repoPath;
   final VoidCallback onInit;
@@ -605,6 +648,142 @@ class NonGitRepositoryView extends StatelessWidget {
             icon: const Icon(Icons.add),
             label: const Text('初始化仓库'),
             onPressed: onInit,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- 新增 Widget：带键盘导航的文件差异视图 ---
+class FileDiffView extends StatefulWidget {
+  final GitService gitService;
+  final List<GitFileStatus> allFiles;
+  final GitFileStatus initialFile;
+  final VoidCallback onClose;
+  final ValueChanged<GitFileStatus> onFileChanged;
+
+  const FileDiffView({
+    super.key,
+    required this.gitService,
+    required this.allFiles,
+    required this.initialFile,
+    required this.onClose,
+    required this.onFileChanged,
+  });
+
+  @override
+  State<FileDiffView> createState() => _FileDiffViewState();
+}
+
+class _FileDiffViewState extends State<FileDiffView> {
+  late GitFileStatus _currentFile;
+  late Future<String> _diffFuture;
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _currentFile = widget.initialFile;
+    _loadDiff();
+    // 请求焦点以便监听键盘事件
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FocusScope.of(context).requestFocus(_focusNode);
+    });
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _loadDiff() {
+    _diffFuture = widget.gitService.getDiff(
+      _currentFile.path,
+      isStaged: _currentFile.isStaged,
+    );
+  }
+
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _navigateToFile(-1);
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _navigateToFile(1);
+      }
+    }
+  }
+
+  void _navigateToFile(int direction) {
+    final currentIndex = widget.allFiles.indexWhere((file) =>
+    file.path == _currentFile.path && file.isStaged == _currentFile.isStaged);
+    if (currentIndex != -1) {
+      int nextIndex = currentIndex + direction;
+      if (nextIndex >= 0 && nextIndex < widget.allFiles.length) {
+        setState(() {
+          _currentFile = widget.allFiles[nextIndex];
+          _loadDiff();
+          widget.onFileChanged(_currentFile);
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      focusNode: _focusNode,
+      onKeyEvent: (node, event) {
+        _handleKeyEvent(event);
+        return KeyEventResult.handled;
+      },
+      child: Column(
+        // --- 核心修正：强制拉伸并调整 AppBar 容器 ---
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 自定义 AppBar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            height: 48,
+            color: Theme.of(context).scaffoldBackgroundColor.withOpacity(0.5),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '变更: ${_currentFile.path}',
+                    style: const TextStyle(fontSize: 14),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: '返回提交历史 (Esc)',
+                  onPressed: widget.onClose,
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          // 差异内容
+          Expanded(
+            child: FutureBuilder<String>(
+              future: _diffFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text('加载差异失败: ${snapshot.error}'),
+                    ),
+                  );
+                }
+                return DiffView(diffData: snapshot.data ?? '没有检测到差异。');
+              },
+            ),
           ),
         ],
       ),

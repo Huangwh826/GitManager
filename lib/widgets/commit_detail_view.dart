@@ -29,6 +29,25 @@ class _CommitDetailViewState extends State<CommitDetailView> {
   @override
   void initState() {
     super.initState();
+    _loadCommitDetails();
+  }
+
+  // --- 核心修正：实现 didUpdateWidget ---
+  @override
+  void didUpdateWidget(CommitDetailView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 当外部传入的 commit 对象发生变化时（通过比较 hash），重新获取提交详情
+    if (widget.commit.hash != oldWidget.commit.hash) {
+      setState(() {
+        _loadCommitDetails();
+        // 重置选中的文件，因为新的提交有不同的文件列表
+        _selectedFile = null;
+      });
+    }
+  }
+
+  /// 封装加载逻辑，方便复用
+  void _loadCommitDetails() {
     _detailFuture = widget.gitService.getCommitDetails(widget.commit.hash);
   }
 
@@ -45,22 +64,36 @@ class _CommitDetailViewState extends State<CommitDetailView> {
         }
 
         final detail = snapshot.data!;
-        if (_selectedFile == null && detail.files.isNotEmpty) {
-          _selectedFile = detail.files.first;
-        }
+        // 确保在构建时，如果 _selectedFile 为空，则默认选中第一个
+        final currentSelectedFile = _selectedFile ?? detail.files.firstOrNull;
 
         return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            AppBar(
-              title: const Text('提交详情'),
-              leading: IconButton(
-                icon: const Icon(Icons.close),
-                tooltip: '返回工作区',
-                onPressed: widget.onClose,
+            // 自定义 AppBar
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              height: 48,
+              color: Theme.of(context).scaffoldBackgroundColor.withOpacity(0.5),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '提交详情: ${detail.shortHash}',
+                      style: const TextStyle(fontSize: 14),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: '返回工作区',
+                    onPressed: widget.onClose,
+                  ),
+                ],
               ),
-              backgroundColor: Colors.grey.withOpacity(0.1),
-              elevation: 0,
             ),
+            const Divider(height: 1),
+            // 主内容区域
             Expanded(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -70,7 +103,8 @@ class _CommitDetailViewState extends State<CommitDetailView> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Flexible(
+                        // 提交元信息，允许滚动
+                        Expanded(
                           flex: 1,
                           child: SingleChildScrollView(
                             child: _buildCommitMeta(context, detail),
@@ -81,6 +115,7 @@ class _CommitDetailViewState extends State<CommitDetailView> {
                           padding: const EdgeInsets.fromLTRB(12.0, 12.0, 12.0, 4.0),
                           child: Text('变更的文件 (${detail.files.length})', style: Theme.of(context).textTheme.titleSmall),
                         ),
+                        // 文件列表
                         Expanded(
                           flex: 2,
                           child: ListView.builder(
@@ -90,7 +125,7 @@ class _CommitDetailViewState extends State<CommitDetailView> {
                               return ListTile(
                                 title: Text(file.path, overflow: TextOverflow.ellipsis),
                                 dense: true,
-                                selected: _selectedFile?.path == file.path,
+                                selected: currentSelectedFile?.path == file.path,
                                 onTap: () => setState(() => _selectedFile = file),
                               );
                             },
@@ -99,11 +134,11 @@ class _CommitDetailViewState extends State<CommitDetailView> {
                       ],
                     ),
                   ),
-                  VerticalDivider(width: 1, thickness: 1, color: Colors.grey[800]),
+                  const VerticalDivider(width: 1),
                   Expanded(
                     flex: 3,
-                    child: _selectedFile != null
-                        ? DiffView(diffData: _selectedFile!.diffContent)
+                    child: currentSelectedFile != null
+                        ? DiffView(diffData: currentSelectedFile.diffContent)
                         : const Center(child: Text('没有文件变更')),
                   ),
                 ],
@@ -123,7 +158,6 @@ class _CommitDetailViewState extends State<CommitDetailView> {
         children: [
           SelectableText(detail.message, style: Theme.of(context).textTheme.bodyLarge),
           const SizedBox(height: 16),
-          // --- 核心修正部分 ---
           Row(
             children: [
               const CircleAvatar(radius: 16),
@@ -132,7 +166,6 @@ class _CommitDetailViewState extends State<CommitDetailView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 明确禁止换行并设置最大行数
                     Text(
                       detail.author,
                       style: const TextStyle(fontWeight: FontWeight.bold),
@@ -154,7 +187,6 @@ class _CommitDetailViewState extends State<CommitDetailView> {
               SelectableText(detail.shortHash, style: const TextStyle(fontFamily: 'monospace')),
             ],
           ),
-          // --- 修正结束 ---
         ],
       ),
     );
