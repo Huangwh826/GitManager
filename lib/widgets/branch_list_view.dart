@@ -7,12 +7,51 @@ import '../models/git_models.dart';
 class BranchListView extends StatelessWidget {
   final List<GitBranch> branches;
   final Function(String) onBranchSelected;
+  /// (新增) 创建新分支的回调
+  final Function(String) onCreateBranch;
 
   const BranchListView({
     super.key,
     required this.branches,
     required this.onBranchSelected,
+    required this.onCreateBranch,
   });
+
+  /// 显示创建分支对话框的辅助方法
+  void _showCreateBranchDialog(BuildContext context) {
+    final TextEditingController controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('创建新分支'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: '分支名称',
+              hintText: '例如: feature/new-design',
+            ),
+          ),
+          actions: [
+            TextButton(
+              child: const Text('取消'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            FilledButton(
+              child: const Text('创建'),
+              onPressed: () {
+                if (controller.text.isNotEmpty) {
+                  onCreateBranch(controller.text);
+                  Navigator.of(context).pop();
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,8 +61,16 @@ class BranchListView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(8.0),
       children: [
-        // 本地分支部分
-        _buildSectionHeader(context, '分支'),
+        // 本地分支部分 (添加了按钮)
+        _buildSectionHeader(
+          context,
+          '本地分支',
+          IconButton(
+            icon: const Icon(Icons.add, size: 18),
+            tooltip: '创建新分支',
+            onPressed: () => _showCreateBranchDialog(context),
+          ),
+        ),
         ...localBranches.map((branch) => _buildBranchTile(context, branch)),
 
         // 远程分支部分
@@ -36,16 +83,22 @@ class BranchListView extends StatelessWidget {
     );
   }
 
-  Widget _buildSectionHeader(BuildContext context, String title) {
+  Widget _buildSectionHeader(BuildContext context, String title, [Widget? trailing]) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-      child: Text(
-        title.toUpperCase(),
-        style: TextStyle(
-          color: Colors.grey[500],
-          fontWeight: FontWeight.bold,
-          fontSize: 12,
-        ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            title.toUpperCase(),
+            style: TextStyle(
+              color: Colors.grey[500],
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+          ),
+          if (trailing != null) trailing,
+        ],
       ),
     );
   }
@@ -65,6 +118,9 @@ class BranchListView extends StatelessWidget {
         ),
         overflow: TextOverflow.ellipsis,
       ),
+      subtitle: branch.upstreamInfo != null
+          ? Text(branch.upstreamInfo!, style: TextStyle(color: Colors.grey[600], fontSize: 11))
+          : null,
       dense: true,
       selected: branch.isCurrent,
       selectedTileColor: Colors.blue.withOpacity(0.2),
@@ -73,14 +129,10 @@ class BranchListView extends StatelessWidget {
     );
   }
 
-  // 辅助方法来对远程分支进行分组
   Widget _buildRemoteBranchGroup(BuildContext context, GitBranch branch, List<GitBranch> allRemotes) {
-    // 这是一个简化的实现，实际应用中可能需要更复杂的逻辑来分组
-    // 这里我们只显示一个示例
     final remoteName = branch.name.split('/')[1];
     final branchesForRemote = allRemotes.where((b) => b.name.contains('$remoteName/')).toList();
 
-    // 为了避免重复渲染，我们只在第一个分支处渲染整个分组
     if (branch != branchesForRemote.first) {
       return const SizedBox.shrink();
     }
@@ -105,7 +157,7 @@ class BranchListView extends StatelessWidget {
               leading: const Icon(Icons.fork_right, size: 16, color: Colors.grey),
               title: Text(b.displayName, style: TextStyle(color: Colors.grey[400])),
               dense: true,
-              onTap: () { /* 远程分支点击逻辑待实现 */ },
+              onTap: () {},
             )).toList(),
           ),
         ),

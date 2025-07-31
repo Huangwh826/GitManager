@@ -1,6 +1,6 @@
 // lib/models/git_models.dart
 
-// ... (GitFileStatusType, GitFileStatus 保持不变)
+// Git 文件状态的枚举
 enum GitFileStatusType {
   modified,
   added,
@@ -9,6 +9,7 @@ enum GitFileStatusType {
   untracked,
 }
 
+// 代表一个文件的状态
 class GitFileStatus {
   final String path;
   final GitFileStatusType type;
@@ -21,14 +22,13 @@ class GitFileStatus {
   });
 }
 
-// --- GitCommit 类 (完整替换) ---
+// 代表一次 Git 提交记录 (列表项)
 class GitCommit {
   final String hash;
   final String author;
   final String date;
   final String message;
 
-  /// 新增一个 getter 用于显示简短的哈希值
   String get shortHash => hash.substring(0, 7);
 
   GitCommit({
@@ -38,9 +38,8 @@ class GitCommit {
     required this.message,
   });
 }
-// --- GitCommit 类结束 ---
 
-// ... (GitBranch, RepoDetailState 保持不变)
+// 代表一个 Git 分支
 class GitBranch {
   final String name;
   final bool isLocal;
@@ -62,6 +61,41 @@ class GitBranch {
   }
 }
 
+// --- 新增部分开始 ---
+
+/// 代表在一次提交中，单个文件的变更情况
+class GitFileDiff {
+  final String path;
+  final GitFileStatusType type;
+  final String diffContent;
+
+  GitFileDiff({
+    required this.path,
+    required this.type,
+    required this.diffContent,
+  });
+}
+
+/// 代表一次提交的完整详细信息
+class GitCommitDetail extends GitCommit {
+  final String committer;
+  final String committerDate;
+  final List<GitFileDiff> files;
+
+  GitCommitDetail({
+    required super.hash,
+    required super.author,
+    required super.date,
+    required super.message,
+    required this.committer,
+    required this.committerDate,
+    required this.files,
+  });
+}
+// --- 新增部分结束 ---
+
+
+// 一个聚合类，用于封装仓库详情视图所需的所有状态。
 class RepoDetailState {
   final List<GitBranch> branches;
   final List<GitCommit> commits;

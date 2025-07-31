@@ -10,8 +10,9 @@ import 'models/git_models.dart';
 import 'widgets/commit_view.dart';
 import 'widgets/branch_list_view.dart';
 import 'widgets/diff_view.dart';
-import 'widgets/commit_history_view.dart'; // 新增
-import 'widgets/staging_area_view.dart'; // 新增
+import 'widgets/commit_history_view.dart';
+import 'widgets/staging_area_view.dart';
+import 'widgets/commit_detail_view.dart'; // 新增引入
 
 void main() {
   runApp(
@@ -35,9 +36,9 @@ class GitManagerApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFF1F2937), // bg-gray-800
+        scaffoldBackgroundColor: const Color(0xFF1F2937),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF111827), // bg-gray-900
+          backgroundColor: Color(0xFF111827),
           elevation: 0,
         ),
       ),
@@ -55,7 +56,6 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-  // 使用 GlobalKey 来从 AppBar 调用 RepositoryDetailView 中的方法
   final GlobalKey<_RepositoryDetailViewState> _repoDetailViewKey = GlobalKey();
 
   @override
@@ -128,7 +128,6 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   Future<RepoDetailState>? _repoStateFuture;
   GitFileStatus? _selectedFileForDiff;
   Future<String>? _diffFuture;
-
   bool _isLoadingAction = false;
 
   @override
@@ -173,28 +172,37 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
     }
   }
 
-  Future<void> _handleFetch() async => _runGitAction(() async {
-    await _gitService.fetch(); _refreshAll();
-  }, successMessage: '抓取成功');
-
-  Future<void> _handlePull() async => _runGitAction(() async {
-    await _gitService.pull(); _refreshAll();
-  }, successMessage: '拉取成功');
-
-  Future<void> _handlePush() async => _runGitAction(() async {
-    await _gitService.push(); _refreshAll();
-  }, successMessage: '推送成功');
-
+  Future<void> _handleFetch() async => _runGitAction(() async { await _gitService.fetch(); _refreshAll(); }, successMessage: '抓取成功');
+  Future<void> _handlePull() async => _runGitAction(() async { await _gitService.pull(); _refreshAll(); }, successMessage: '拉取成功');
+  Future<void> _handlePush() async => _runGitAction(() async { await _gitService.push(); _refreshAll(); }, successMessage: '推送成功');
   Future<void> _handleStageFile(String path) async => _runGitAction(() => _gitService.stageFile(path).then((_) => _refreshAll()));
   Future<void> _handleUnstageFile(String path) async => _runGitAction(() => _gitService.unstageFile(path).then((_) => _refreshAll()));
   Future<void> _handleCommit(String message) async => _runGitAction(() => _gitService.commit(message).then((_) => _refreshAll()), successMessage: '提交成功！');
   Future<void> _handleSwitchBranch(String branchName) async => _runGitAction(() => _gitService.switchBranch(branchName).then((_) => _refreshAll()), successMessage: '已切换到分支 $branchName');
+  Future<void> _handleCreateBranch(String branchName) async => _runGitAction(() => _gitService.createBranch(branchName).then((_) => _refreshAll()), successMessage: '已创建并切换到新分支 $branchName');
 
   void _onFileSelected(GitFileStatus file) {
     setState(() {
       _selectedFileForDiff = file;
       _diffFuture = _gitService.getDiff(file.path, isStaged: file.isStaged);
     });
+  }
+
+  // --- 新增处理函数 ---
+  void _onCommitSelected(GitCommit commit) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: SizedBox(
+          width: MediaQuery.of(context).size.width * 0.8,
+          height: MediaQuery.of(context).size.height * 0.8,
+          child: CommitDetailView(
+            commit: commit,
+            gitService: _gitService,
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -222,21 +230,25 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
         return Row(
           children: [
-            // 左栏：分支
             Container(
               width: 260,
               decoration: BoxDecoration(border: Border(right: BorderSide(color: Colors.grey[900]!))),
-              child: BranchListView(branches: state.branches, onBranchSelected: _handleSwitchBranch),
+              child: BranchListView(
+                branches: state.branches,
+                onBranchSelected: _handleSwitchBranch,
+                onCreateBranch: _handleCreateBranch,
+              ),
             ),
-            // 中栏：提交历史
             Expanded(
               flex: 3,
               child: Container(
                 decoration: BoxDecoration(border: Border(right: BorderSide(color: Colors.grey[900]!))),
-                child: CommitHistoryView(commits: state.commits),
+                child: CommitHistoryView(
+                  commits: state.commits,
+                  onCommitSelected: _onCommitSelected, // 传递回调
+                ),
               ),
             ),
-            // 右栏：暂存区和差异
             Expanded(
               flex: 2,
               child: Column(
