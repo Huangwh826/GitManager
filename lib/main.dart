@@ -8,7 +8,6 @@ import 'package:multi_split_view/multi_split_view.dart';
 import 'services/repository_service.dart';
 import 'services/git_service.dart';
 import 'models/git_models.dart';
-import 'widgets/commit_view.dart';
 import 'widgets/branch_list_view.dart';
 import 'widgets/diff_view.dart';
 import 'widgets/commit_history_view.dart';
