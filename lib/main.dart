@@ -440,14 +440,41 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
     _refreshAll();
   }, successMessage: '推送成功');
 
+  // --- 核心优化：修改暂存和取消暂存的逻辑 ---
   Future<void> _handleStageFile(String path) async => _runGitAction(
-        () => _gitService.stageFile(path).then((_) => _refreshAll()),
+        () => _gitService.stageFile(path).then((_) {
+          _updateFileStatus(); // 调用局部刷新
+        }),
   );
 
   Future<void> _handleUnstageFile(String path) async => _runGitAction(
-        () => _gitService.unstageFile(path).then((_) => _refreshAll()),
+        () => _gitService.unstageFile(path).then((_) {
+          _updateFileStatus(); // 调用局部刷新
+        }),
   );
 
+  // --- 核心优化：新增的局部刷新方法 ---
+  Future<void> _updateFileStatus() async {
+    try {
+      final currentState = await _repoStateFuture;
+      if (currentState == null || !mounted) return;
+
+      // 只获取最新的文件状态
+      final newFileStatus = await _gitService.getStatus();
+
+      // 使用旧的分支和提交数据，结合新的文件状态，更新Future
+      setState(() {
+        _repoStateFuture = Future.value(RepoDetailState(
+          branches: currentState.branches,
+          commits: currentState.commits,
+          fileStatus: newFileStatus,
+        ));
+      });
+    } catch (e) {
+      _handleError(e);
+    }
+  }
+  
   Future<void> _handleCommit(String message) async => _runGitAction(
         () => _gitService.commit(message).then((_) {
       _refreshAll();
@@ -556,17 +583,13 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
           child: FutureBuilder<RepoDetailState>(
             future: _repoStateFuture,
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
+              if (snapshot.connectionState == ConnectionState.waiting && !_isFirstLayoutDone) {
                 return const Center(child: CircularProgressIndicator());
               }
-
-              if (snapshot.hasData && !_isFirstLayoutDone) {
-                _isFirstLayoutDone = true;
-              }
-
+              
               if (snapshot.hasError) {
                 if (snapshot.error is GitCommandException &&
-                    (snapshot.error as GitCommandException).message == '这不是一个 Git 仓库。') {
+                    (snapshot.error as GitCommandException).message.contains('这不是一个 Git 仓库')) {
                   return NonGitRepositoryView(
                     repoPath: widget.repoPath,
                     onInit: () => _runGitAction(
@@ -586,6 +609,11 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
                 );
               }
               if (!snapshot.hasData) return const Center(child: Text('没有数据'));
+              
+              if (snapshot.hasData && !_isFirstLayoutDone) {
+                _isFirstLayoutDone = true;
+              }
+
 
               final state = snapshot.data!;
 
@@ -980,6 +1008,7 @@ class _FileDiffViewState extends State<FileDiffView> {
                       padding: const EdgeInsets.all(16.0),
                       child: Text('加载差异失败: ${snapshot.error}'),
                     ),
+
                   );
                 }
                 final diffData = snapshot.data ?? '没有检测到差异。';

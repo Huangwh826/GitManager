@@ -31,39 +31,39 @@ class WindowTitleBar extends StatelessWidget implements PreferredSizeWidget {
         children: [
           // 左侧的标签页区域
           Expanded(
-            child: MoveWindow( // 允许通过拖动这部分来移动窗口
-              child: Row(
-                children: [
-                  const SizedBox(width: 16), // 左侧留白
-                  Expanded(
-                    child: (repositoryPaths.isNotEmpty && tabController != null)
-                        ? Align(
-                      alignment: Alignment.bottomLeft,
-                      child: TabBar(
-                        controller: tabController,
-                        isScrollable: true,
-                        indicatorWeight: 2,
-                        indicatorPadding: const EdgeInsets.symmetric(horizontal: 4),
-                        indicatorColor: Colors.blueAccent,
-                        tabs: repositoryPaths
-                            .asMap()
-                            .entries
-                            .map((entry) => _buildTab(context, entry.key, entry.value))
-                            .toList(),
+              child: MoveWindow( // 允许通过拖动这部分来移动窗口
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: (repositoryPaths.isNotEmpty && tabController != null)
+                            ? TabBar(
+                                controller: tabController,
+                                isScrollable: true,
+                                indicatorWeight: 2,
+                                tabAlignment: TabAlignment.start, // 实现左对齐
+                                indicatorPadding: const EdgeInsets.symmetric(horizontal: 4),
+                                indicatorColor: Colors.blueAccent,
+                                tabs: repositoryPaths
+                                    .asMap()
+                                    .entries
+                                    .map((entry) => _buildTab(context, entry.key, entry.value))
+                                    .toList(),
+                              )
+                            : Container(),
                       ),
-                    )
-                        : Container(),
+                      IconButton(
+                        icon: const Icon(Icons.add, size: 20),
+                        onPressed: onAddRepository,
+                        tooltip: '添加本地仓库',
+                        splashRadius: 18,
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.add, size: 20),
-                    onPressed: onAddRepository,
-                    tooltip: '添加本地仓库',
-                    splashRadius: 18,
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
           // 右侧的窗口控制按钮
           const WindowButtons(),
         ],
