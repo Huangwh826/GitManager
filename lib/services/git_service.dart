@@ -72,7 +72,7 @@ class GitService {
   Future<List<GitFileStatus>> getStatus() async {
     final result = await _runGitCommand(['status', '--porcelain=v1', '--untracked-files=all']);
     final List<GitFileStatus> files = [];
-    final lines = result.stdout.toString().split('\n');
+final lines = result.stdout.toString().split('\n');
     for (var line in lines) {
       if (line.isEmpty) continue;
       String xy = line.substring(0, 2);
@@ -138,16 +138,38 @@ class GitService {
       if (line.isEmpty || line.contains('->')) continue;
       final isCurrent = line.startsWith('*');
       final lineContent = isCurrent ? line.substring(2) : line;
+      // 修改正则表达式以匹配领先和落后的提交数
       final RegExp re = RegExp(r'^\s*([^\s]+)\s+[a-f0-9]+\s*(?:\[([^\]]+)\])?.*$');
       final match = re.firstMatch(lineContent);
       if (match != null) {
         final branchName = match.group(1)!;
-        final upstreamInfo = match.group(2);
+        String? upstreamInfo = match.group(2);
+        int aheadCommits = 0;
+        int behindCommits = 0;
+
+        // 提取领先和落后的提交数
+        if (upstreamInfo != null) {
+          final RegExp aheadRe = RegExp(r'ahead\s+(\d+)');
+          final RegExp behindRe = RegExp(r'behind\s+(\d+)');
+
+          final aheadMatch = aheadRe.firstMatch(upstreamInfo);
+          if (aheadMatch != null) {
+            aheadCommits = int.parse(aheadMatch.group(1)!);
+          }
+
+          final behindMatch = behindRe.firstMatch(upstreamInfo);
+          if (behindMatch != null) {
+            behindCommits = int.parse(behindMatch.group(1)!);
+          }
+        }
+
         branches.add(GitBranch(
           name: branchName,
           isLocal: !branchName.startsWith('remotes/'),
           isCurrent: isCurrent,
           upstreamInfo: upstreamInfo,
+          aheadCommits: aheadCommits,
+          behindCommits: behindCommits,
         ));
       }
     }

@@ -45,12 +45,16 @@ class GitBranch {
   final bool isLocal;
   final bool isCurrent;
   final String? upstreamInfo;
+  final int aheadCommits; // 领先远程的提交数
+  final int behindCommits; // 落后远程的提交数
 
   GitBranch({
     required this.name,
     required this.isLocal,
     this.isCurrent = false,
     this.upstreamInfo,
+    this.aheadCommits = 0,
+    this.behindCommits = 0,
   });
 
   String get displayName {

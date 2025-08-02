@@ -95,6 +95,30 @@ class BranchListView extends StatelessWidget {
   }
 
   Widget _buildBranchTile(BuildContext context, GitBranch branch) {
+    // 构建领先/落后提交信息的小部件
+    Widget buildCommitStatus() {
+      if (branch.aheadCommits == 0 && branch.behindCommits == 0) {
+        return const SizedBox.shrink();
+      }
+
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (branch.aheadCommits > 0)
+            Text(
+              '↑${branch.aheadCommits}',
+              style: const TextStyle(color: Colors.green, fontSize: 11),
+            ),
+          if (branch.aheadCommits > 0 && branch.behindCommits > 0)
+            const SizedBox(width: 4),
+          if (branch.behindCommits > 0)
+            Text(
+              '↓${branch.behindCommits}',
+              style: const TextStyle(color: Colors.red, fontSize: 11),
+            ),
+        ],
+      );
+    }
     // --- 核心修改：使用 GestureDetector 包裹 ListTile ---
     return GestureDetector(
       onDoubleTap: branch.isCurrent ? null : () => onBranchSelected(branch.name),
@@ -104,13 +128,20 @@ class BranchListView extends StatelessWidget {
           color: branch.isCurrent ? Colors.blueAccent : Colors.grey,
           size: 18,
         ),
-        title: Text(
-          branch.displayName,
-          style: TextStyle(
-            fontWeight: branch.isCurrent ? FontWeight.bold : FontWeight.normal,
-            color: branch.isCurrent ? Colors.white : Colors.grey[300],
-          ),
-          overflow: TextOverflow.ellipsis,
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                branch.displayName,
+                style: TextStyle(
+                  fontWeight: branch.isCurrent ? FontWeight.bold : FontWeight.normal,
+                  color: branch.isCurrent ? Colors.white : Colors.grey[300],
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            buildCommitStatus(),
+          ],
         ),
         subtitle: branch.upstreamInfo != null
             ? Text(branch.upstreamInfo!, style: TextStyle(color: Colors.grey[600], fontSize: 11), overflow: TextOverflow.ellipsis)

@@ -269,6 +269,7 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
   bool _controllersInitialized = false;
   bool _isFirstLayoutDone = false;
+  late MediaQueryData _mediaQuery;
 
   // --- 新增状态：用于跟踪冲突文件 ---
   List<String> _conflictFiles = [];
@@ -277,12 +278,18 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   void initState() {
     super.initState();
     _gitService = GitService(repoPath: widget.repoPath);
+    _mediaQuery = MediaQueryData(); // 初始化为空，会在didChangeDependencies中更新
     _refreshAll();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final newMediaQuery = MediaQuery.of(context);
+    if (_mediaQuery.size != newMediaQuery.size) {
+      _mediaQuery = newMediaQuery;
+      _updateControllersForNewSize(_mediaQuery.size);
+    }
     if (!_controllersInitialized) {
       _initializeControllers();
     }
@@ -291,32 +298,76 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   void _initializeControllers() {
     if (!mounted) return;
 
-    final screenWidth = MediaQuery.of(context).size.width;
-    final leftPanelWidth = (screenWidth * 0.2).clamp(200.0, 300.0);
-    final rightPanelMinWidth = (screenWidth * 0.3).clamp(350.0, 500.0);
+    // 创建控制器实例
+    _mainController = MultiSplitViewController();
+    _workingCopyController = MultiSplitViewController();
+    _commitDetailController = MultiSplitViewController();
 
-    _mainController = MultiSplitViewController(
-      areas: [
-        Area(size: leftPanelWidth, minimalSize: 200),
-        Area(minimalSize: rightPanelMinWidth),
-      ],
-    );
-
-    _workingCopyController = MultiSplitViewController(
-      areas: [
-        Area(weight: 0.5, minimalSize: 300),
-        Area(weight: 0.5, minimalSize: rightPanelMinWidth),
-      ],
-    );
-
-    _commitDetailController = MultiSplitViewController(
-      areas: [
-        Area(weight: 0.4, minimalSize: 300), // 提交历史
-        Area(weight: 0.6, minimalSize: 400), // 提交详情
-      ],
-    );
+    _mediaQuery = MediaQuery.of(context);
+    final screenSize = _mediaQuery.size;
+    _updateControllersForNewSize(screenSize);
 
     _controllersInitialized = true;
+  }
+
+  void _updateControllersForNewSize(Size newSize) {
+    if (!mounted) return;
+
+    // 根据新尺寸重新计算面板大小
+    final leftPanelWidth = (newSize.width * 0.2).clamp(200.0, 300.0);
+    final rightPanelMinWidth = (newSize.width * 0.3).clamp(350.0, 500.0);
+
+    // 更新主控制器
+    if (_mainController != null) {
+      _mainController!.areas = [
+        Area(size: leftPanelWidth, minimalSize: 200),
+        Area(minimalSize: rightPanelMinWidth),
+      ];
+    }
+
+    // 更新工作区控制器
+    if (_workingCopyController != null) {
+      // 根据屏幕宽度调整左右比例
+      double leftWeight = 0.5;
+      double rightWeight = 0.5;
+
+      if (newSize.width < 1000) {
+        // 小屏幕时，让左侧略窄
+        leftWeight = 0.4;
+        rightWeight = 0.6;
+      } else if (newSize.width > 1600) {
+        // 大屏幕时，让左侧略宽
+        leftWeight = 0.55;
+        rightWeight = 0.45;
+      }
+
+      _workingCopyController!.areas = [
+        Area(weight: leftWeight, minimalSize: 300),
+        Area(weight: rightWeight, minimalSize: rightPanelMinWidth),
+      ];
+    }
+
+    // 更新提交详情控制器
+    if (_commitDetailController != null) {
+      // 根据屏幕宽度调整左右比例（与工作区控制器保持一致）
+      double historyWeight = 0.5;
+      double detailWeight = 0.5;
+
+      if (newSize.width < 1000) {
+        // 小屏幕时，让历史区域更窄（与工作区控制器保持一致）
+        historyWeight = 0.4;
+        detailWeight = 0.6;
+      } else if (newSize.width > 1600) {
+        // 大屏幕时，让历史区域更宽（与工作区控制器保持一致）
+        historyWeight = 0.55;
+        detailWeight = 0.45;
+      }
+
+      _commitDetailController!.areas = [
+        Area(weight: historyWeight, minimalSize: 300), // 提交历史
+        Area(weight: detailWeight, minimalSize: rightPanelMinWidth),  // 提交详情（使用统一的最小宽度）
+      ];
+    }
   }
 
   @override
@@ -542,6 +593,17 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
                 return const Center(child: CircularProgressIndicator());
               }
 
+              return LayoutBuilder(
+            builder: (context, constraints) {
+              // 确保控制器已初始化并适应当前尺寸
+              if (_controllersInitialized && constraints.maxWidth > 0) {
+                final currentSize = Size(constraints.maxWidth, constraints.maxHeight);
+                if (_mediaQuery.size != currentSize) {
+                  _mediaQuery = MediaQuery.of(context);
+                  _updateControllersForNewSize(currentSize);
+                }
+              }
+
               return MultiSplitView(
                 controller: _mainController!,
                 children: [
@@ -556,6 +618,8 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
                     _buildCommitDetailView(state, _selectedCommit!),
                 ],
               );
+            },
+          );
             },
           ),
         ),
@@ -685,7 +749,7 @@ class RepoActionsToolbar extends StatelessWidget {
         children: [
           TextButton.icon(
             icon: const Icon(Icons.download, size: 16),
-            label: const Text('抓取'),
+            label: const Text('抓取（Fetch）'),
             onPressed: isLoading ? null : onFetch,
             style: TextButton.styleFrom(
               foregroundColor: Colors.white,
@@ -695,7 +759,7 @@ class RepoActionsToolbar extends StatelessWidget {
           const SizedBox(width: 8),
           TextButton.icon(
             icon: const Icon(Icons.arrow_downward, size: 16),
-            label: const Text('拉取'),
+            label: const Text('拉取（Pull）'),
             onPressed: isLoading ? null : onPull,
             style: TextButton.styleFrom(
               foregroundColor: Colors.white,
@@ -705,7 +769,7 @@ class RepoActionsToolbar extends StatelessWidget {
           const SizedBox(width: 8),
           TextButton.icon(
             icon: const Icon(Icons.arrow_upward, size: 16),
-            label: const Text('推送'),
+            label: const Text('推送（Push）'),
             onPressed: isLoading ? null : onPush,
             style: TextButton.styleFrom(
               foregroundColor: Colors.white,
@@ -716,7 +780,7 @@ class RepoActionsToolbar extends StatelessWidget {
           // --- 新增按钮 ---
           TextButton.icon(
             icon: const Icon(Icons.public, size: 16),
-            label: const Text('远程'),
+            label: const Text('远程（Remote）'),
             onPressed: isLoading ? null : onNavigateToRemotes,
             style: TextButton.styleFrom(
               foregroundColor: Colors.white,
@@ -726,7 +790,7 @@ class RepoActionsToolbar extends StatelessWidget {
           const SizedBox(width: 8),
           TextButton.icon(
             icon: const Icon(Icons.inventory_2_outlined, size: 16),
-            label: const Text('Stash'),
+            label: const Text('暂存（Stash）'),
             onPressed: isLoading ? null : onNavigateToStashes,
             style: TextButton.styleFrom(
               foregroundColor: Colors.white,
