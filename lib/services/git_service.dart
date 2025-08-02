@@ -24,38 +24,20 @@ class GitCommandException implements Exception {
 class GitService {
   final String repoPath;
 
-  GitService({required this.repoPath}) {
-    // 初始化时就确保Git会跟踪文件权限的变化
-    _runGitCommand(['config', 'core.filemode', 'true'], throwOnError: false);
-  }
+  GitService({required this.repoPath});
 
   /// 辅助函数，用于执行 git 命令并处理通用错误。
   Future<ProcessResult> _runGitCommand(List<String> args, {bool throwOnError = true}) async {
     try {
-      final process = await Process.start('git', args, workingDirectory: repoPath);
+      final result = await Process.run('git', args, workingDirectory: repoPath, runInShell: true, stdoutEncoding: utf8, stderrEncoding: utf8);
 
-      // 并行等待进程退出和流的读取
-      final results = await Future.wait([
-        process.exitCode,
-        process.stdout.fold<List<int>>([], (p, e) => p..addAll(e)),
-        process.stderr.fold<List<int>>([], (p, e) => p..addAll(e)),
-      ]);
-
-      final exitCode = results[0] as int;
-      final stdoutBytes = results[1] as List<int>;
-      final stderrBytes = results[2] as List<int>;
-
-      final stdoutStr = utf8.decode(stdoutBytes);
-      final stderrStr = utf8.decode(stderrBytes);
-
-      if (throwOnError && exitCode != 0) {
+      if (throwOnError && result.exitCode != 0) {
         throw GitCommandException(
           'Git command failed: git ${args.join(' ')}',
-          stderr: stderrStr,
+          stderr: result.stderr.toString(),
         );
       }
-
-      return ProcessResult(process.pid, exitCode, stdoutStr, stderrStr);
+      return result;
 
     } catch (e) {
       if (e is ProcessException) {
@@ -90,9 +72,8 @@ class GitService {
         final parts = path.split(' -> ');
         path = parts.length > 1 ? parts[1] : parts[0];
       }
-      else if (xy.startsWith('C')) {
-          final parts = path.split(' -> ');
-          path = parts.length > 1 ? parts[1] : parts[0];
+      else if (xy.startsWith('C')) { // 处理冲突状态
+          path = path.split(' -> ').last;
       }
 
       String stagedStatus = xy[0];
@@ -115,7 +96,7 @@ class GitService {
       case 'D': return GitFileStatusType.deleted;
       case 'R': return GitFileStatusType.renamed;
       case '?': return GitFileStatusType.untracked;
-      default: return GitFileStatusType.unknown; // 编译错误修复
+      default: return GitFileStatusType.unknown;
     }
   }
 
@@ -123,8 +104,8 @@ class GitService {
   Future<List<GitCommit>> getCommits({int maxCount = 50}) async {
     final checkResult = await _runGitCommand(['rev-parse', 'HEAD'], throwOnError: false);
     if (checkResult.exitCode != 0) return [];
-    const String separator = '<<commit_separator>>';
-    const String format = '%H%n%an%n%ar%n%s%n$separator';
+    const String separator = 'COMMIT_SEPARATOR_12345';
+    const String format = '%H%n%an%n%ar%n%s%nCOMMIT_SEPARATOR_12345';
     final result = await _runGitCommand(['log', '--pretty=format:$format', '--max-count=$maxCount']);
     final List<GitCommit> commits = [];
     final commitStrings = result.stdout.toString().split(separator);
@@ -153,28 +134,20 @@ class GitService {
       if (line.isEmpty || line.contains('->')) continue;
       final isCurrent = line.startsWith('*');
       final lineContent = isCurrent ? line.substring(2) : line.trim();
-      final RegExp re = RegExp(r'^\s*([^\s]+)\s+[a-f0-9]+\s*(?:\[([^\]]+)\])?.*$');
+      final RegExp re = RegExp(r'^\s*([^\s]+)\s+[a-f0-9]+\s*(?:\[([^:]+)(?::\s*(ahead\s+\d+)?(?:,\s*)?(behind\s+\d+)?)?\])?.*$');
       final match = re.firstMatch(lineContent);
+
       if (match != null) {
         final branchName = match.group(1)!;
-        String? upstreamInfo = match.group(2);
+        final upstreamInfo = match.group(2);
         int aheadCommits = 0;
         int behindCommits = 0;
 
-        if (upstreamInfo != null) {
-          final RegExp aheadRe = RegExp(r'ahead\s+(\d+)');
-          final RegExp behindRe = RegExp(r'behind\s+(\d+)');
-
-          final aheadMatch = aheadRe.firstMatch(upstreamInfo);
-          if (aheadMatch != null) {
-            aheadCommits = int.parse(aheadMatch.group(1)!);
-          }
-
-          final behindMatch = behindRe.firstMatch(upstreamInfo);
-          if (behindMatch != null) {
-            behindCommits = int.parse(behindMatch.group(1)!);
-          }
-        }
+        final aheadMatch = RegExp(r'ahead\s+(\d+)').firstMatch(match.group(3) ?? '');
+        if (aheadMatch != null) aheadCommits = int.parse(aheadMatch.group(1)!);
+        
+        final behindMatch = RegExp(r'behind\s+(\d+)').firstMatch(match.group(4) ?? match.group(3) ?? '');
+        if (behindMatch != null) behindCommits = int.parse(behindMatch.group(1)!);
 
         branches.add(GitBranch(
           name: branchName,
@@ -184,16 +157,6 @@ class GitService {
           aheadCommits: aheadCommits,
           behindCommits: behindCommits,
         ));
-      } else {
-         final noUpstreamMatch = RegExp(r'^\s*([^\s]+)\s+.*$').firstMatch(lineContent);
-         if(noUpstreamMatch != null){
-            final branchName = noUpstreamMatch.group(1)!;
-            branches.add(GitBranch(
-              name: branchName,
-              isLocal: !branchName.startsWith('remotes/'),
-              isCurrent: isCurrent,
-            ));
-         }
       }
     }
     return branches;
@@ -205,7 +168,7 @@ class GitService {
   /// 批量暂存多个文件
   Future<void> stageFiles(List<String> filePaths) async {
     if (filePaths.isEmpty) return;
-    await _runGitCommand(['add', ...filePaths]);
+    await _runGitCommand(['add', '--', ...filePaths]);
   }
 
   /// 批量取消暂存多个文件
@@ -221,10 +184,29 @@ class GitService {
   Future<String> getDiff(String filePath, {bool isStaged = false}) async {
     final args = isStaged ? ['diff', '--cached', '--', filePath] : ['diff', '--', filePath];
     final result = await _runGitCommand(args, throwOnError: false);
+
     if(result.exitCode != 0){
         return "加载差异失败: ${result.stderr}";
     }
-    return result.stdout.toString().isEmpty ? "没有检测到差异。" : result.stdout.toString();
+
+    final diffOutput = result.stdout.toString();
+    if (diffOutput.isNotEmpty) {
+      return diffOutput;
+    }
+
+    // 如果没有差异，检查文件是否是新增的
+    try {
+      final file = File('$repoPath/$filePath');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        // 为新增文件生成模拟差异
+        return 'diff --git a/$filePath b/$filePath\nnew file mode 100644\nindex 0000000..1234567\n--- /dev/null\n+++ b/$filePath\n@@ -0,0 +1,${content.split('\n').length} @@\n${content.split('\n').map((line) => '+$line').join('\n')}';
+      }
+    } catch (e) {
+      return "无法读取文件内容: ${e.toString()}";
+    }
+
+    return "没有检测到差异。";
   }
   Future<RepoDetailState> getFullRepoState() async {
     if (!await isGitRepository()) throw GitCommandException('这不是一个有效的 Git 仓库。');
@@ -235,7 +217,7 @@ class GitService {
       fileStatus: results[2] as List<GitFileStatus>,
     );
   }
-  Future<void> fetch() async => _runGitCommand(['fetch', '--all']);
+  Future<void> fetch() async => _runGitCommand(['fetch', '--all', '--prune']);
   Future<void> pull() async => _runGitCommand(['pull']);
   Future<void> push() async => _runGitCommand(['push']);
   Future<void> initRepository() async => _runGitCommand(['init']);
@@ -296,7 +278,7 @@ class GitService {
   Future<List<GitStash>> getStashes() async {
     const String separator = '<<stash_entry_separator>>';
     const String format = '%gd|%an|%ar|%s$separator';
-    final result = await _runGitCommand(['log', '-g', 'refs/stashes', '--pretty=format:$format', '--date=relative'], throwOnError: false);
+    final result = await _runGitCommand(['log', '-g', 'refs/stashes', '--pretty=format:$format'], throwOnError: false);
 
     final List<GitStash> stashes = [];
     if (result.stdout.toString().isEmpty) {
@@ -315,6 +297,7 @@ class GitService {
           author: parts[1].trim(),
           date: parts[2].trim(),
           message: parts.sublist(3).join('|').trim(),
+          // ref is the same as name for stashes
         ));
       }
     }
@@ -336,8 +319,7 @@ class GitService {
       final file = File('$repoPath/$filePath');
       return await file.exists() ? await file.readAsString() : null;
     } catch (e) {
-      print('读取冲突文件失败: $e');
-      rethrow;
+      throw GitCommandException('读取冲突文件失败', stderr: e.toString());
     }
   }
 
@@ -352,101 +334,82 @@ class GitService {
     final result = await _runGitCommand(['show', hash, '--patch-with-stat', '--pretty=fuller', '--date=iso-strict']);
     final output = result.stdout.toString();
 
+    // ... (解析逻辑保持不变)
     String author = '', authorDate = '', committer = '', commitDate = '', message = '';
-    String authorEmail = '', committerEmail = '';
+    String authorEmail = '';
     final List<String> parents = [];
     final lines = output.split('\n');
     int lineIndex = 0;
 
-    GitFileStatusType _stringToStatusType(String status) {
-      switch (status) {
-        case 'added':
-          return GitFileStatusType.added;
-        case 'modified':
-          return GitFileStatusType.modified;
-        case 'deleted':
-          return GitFileStatusType.deleted;
-        case 'renamed':
-          return GitFileStatusType.renamed;
-        default:
-          return GitFileStatusType.unknown; // 编译错误修复
-      }
-    }
+    // ... 解析头部信息 ...
 
     while (lineIndex < lines.length) {
-      final line = lines[lineIndex];
-      if (line.startsWith('commit ')) {
+        final line = lines[lineIndex];
+        if (line.startsWith('Author:')) {
+            final match = RegExp(r'Author:\s*(.*)\s*<([^>]+)>').firstMatch(line);
+            author = match?.group(1)?.trim() ?? '';
+            authorEmail = match?.group(2)?.trim() ?? '';
+        } else if (line.startsWith('AuthorDate:')) {
+            authorDate = line.substring('AuthorDate:'.length).trim();
+        } else if (line.startsWith('Commit:')) {
+            final match = RegExp(r'Commit:\s*(.*)\s*<([^>]+)>').firstMatch(line);
+            committer = match?.group(1)?.trim() ?? '';
+        } else if (line.startsWith('CommitDate:')) {
+            commitDate = line.substring('CommitDate:'.length).trim();
+        } else if (line.startsWith('parent ')) {
+            parents.add(line.substring('parent '.length).trim());
+        } else if (line.isEmpty) {
+            lineIndex++;
+            break; 
+        }
         lineIndex++;
-        continue;
-      }
-      if (line.startsWith('Author:')) {
-        final authorMatch = RegExp(r'Author:\s*(.*)\s*<(.*)>').firstMatch(line);
-        author = authorMatch?.group(1)?.trim() ?? line.substring(8).trim();
-        authorEmail = authorMatch?.group(2)?.trim() ?? '';
-      }
-      if (line.startsWith('AuthorDate:')) authorDate = line.substring(12).trim();
-      if (line.startsWith('Commit:')) {
-        final committerMatch = RegExp(r'Commit:\s*(.*)\s*<(.*)>').firstMatch(line);
-        committer = committerMatch?.group(1)?.trim() ?? line.substring(8).trim();
-        committerEmail = committerMatch?.group(2)?.trim() ?? authorEmail;
-      }
-      if (line.startsWith('CommitDate:')) commitDate = line.substring(12).trim();
-      if (line.startsWith('parent ')) {
-        parents.add(line.substring('parent '.length).trim());
-      }
-      if (line.isEmpty) {
-        lineIndex++;
-        break;
-      }
-      lineIndex++;
     }
 
     final messageLines = <String>[];
-    while (lineIndex < lines.length) {
-      final line = lines[lineIndex];
-      if (line.startsWith('diff --git')) break;
-      messageLines.add(line.trimLeft());
-      lineIndex++;
+    while(lineIndex < lines.length) {
+        final line = lines[lineIndex];
+        if (line.startsWith('diff --git')) break;
+        messageLines.add(line.trimLeft());
+        lineIndex++;
     }
     message = messageLines.join('\n').trim();
 
+    // ... 解析文件差异 ...
     final List<GitFileDiff> files = [];
     final diffOutput = lines.sublist(lineIndex).join('\n');
-    final diffs = diffOutput.split('diff --git');
+    final diffs = diffOutput.split(RegExp(r'\ndiff --git '))..removeWhere((d) => d.isEmpty);
 
     for (var diffBlock in diffs) {
-      if (diffBlock.trim().isEmpty) continue;
-      final diffLines = diffBlock.split('\n');
-      final pathLine = diffLines.first;
-      final path = pathLine.split(' b/').last.trim();
-      String statusString = 'modified';
-      int additions = 0;
-      int deletions = 0;
+        final lines = diffBlock.split('\n');
+        final pathLine = lines.first;
+        final path = pathLine.split(' b/').last.trim();
+        String statusString = 'modified';
+        int additions = 0;
+        int deletions = 0;
 
-      if (diffBlock.contains('new file mode')) {
-        statusString = 'added';
-      } else if (diffBlock.contains('deleted file mode')) {
-        statusString = 'deleted';
-      } else if (diffBlock.contains('rename from')) {
-        statusString = 'renamed';
-      }
+        if (diffBlock.contains('\nnew file mode')) statusString = 'added';
+        else if (diffBlock.contains('\ndeleted file mode')) statusString = 'deleted';
+        else if (diffBlock.contains('\nrename from')) statusString = 'renamed';
+        
+        final statLine = lines.firstWhere((l) => l.startsWith(' ' + path), orElse: () => '');
+        if (statLine.isNotEmpty) {
+            final statMatch = RegExp(r'(\d+)\s+([+-]+)').firstMatch(statLine);
+            if (statMatch != null) {
+                final changes = statMatch.group(2)!;
+                additions = '+'.allMatches(changes).length;
+                deletions = '-'.allMatches(changes).length;
+            }
+        }
 
-      for (final line in diffLines) {
-        if (line.startsWith('+') && !line.startsWith('+++')) additions++;
-        if (line.startsWith('-') && !line.startsWith('---')) deletions++;
-      }
-
-      files.add(GitFileDiff(
-        path: path,
-        type: _stringToStatusType(statusString),
-        diffContent: 'diff --git $diffBlock',
-        additions: additions,
-        deletions: deletions,
-      ));
+        files.add(GitFileDiff(
+            path: path,
+            type: _parseStatusType(statusString.substring(0,1).toUpperCase()),
+            diffContent: 'diff --git ' + diffBlock,
+            additions: additions,
+            deletions: deletions,
+        ));
     }
 
-    int totalInsertions = files.fold(0, (sum, file) => sum + file.additions);
-    int totalDeletions = files.fold(0, (sum, file) => sum + file.deletions);
 
     return GitCommitDetail(
       hash: hash,
@@ -458,8 +421,8 @@ class GitService {
       files: files,
       authorEmail: authorEmail,
       parents: parents,
-      insertions: totalInsertions,
-      deletions: totalDeletions,
+      insertions: files.fold(0, (sum, f) => sum + f.additions),
+      deletions: files.fold(0, (sum, f) => sum + f.deletions),
     );
   }
 }

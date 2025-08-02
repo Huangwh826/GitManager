@@ -19,6 +19,9 @@ import 'widgets/window_title_bar.dart';
 import 'widgets/remote_repository_view.dart';
 import 'widgets/stash_management_view.dart';
 import 'widgets/conflict_resolver_view.dart';
+import 'widgets/file_diff_view.dart';
+import 'widgets/commit_file_diff_view.dart';
+import 'widgets/non_git_repository_view.dart';
 
 
 void main() {
@@ -191,11 +194,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
     final removedPath = repoService.repositoryPaths[index];
     repoService.removeRepository(removedPath);
-
-    // 如果关闭的是当前选中的仓库，且还有其他仓库，则选中第一个仓库
-    if (repoService.selectedRepositoryPath == removedPath && repoService.repositoryPaths.isNotEmpty) {
-      repoService.selectRepository(repoService.repositoryPaths.first);
-    }
   }
 
   void _updateTabController(List<String> repos) {
@@ -327,45 +325,17 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
     // 更新工作区控制器
     if (_workingCopyController != null) {
-      // 根据屏幕宽度调整左右比例
-      double leftWeight = 0.5;
-      double rightWeight = 0.5;
-
-      if (newSize.width < 1000) {
-        // 小屏幕时，让左侧略窄
-        leftWeight = 0.4;
-        rightWeight = 0.6;
-      } else if (newSize.width > 1600) {
-        // 大屏幕时，让左侧略宽
-        leftWeight = 0.55;
-        rightWeight = 0.45;
-      }
-
       _workingCopyController!.areas = [
-        Area(weight: leftWeight, minimalSize: 300),
-        Area(weight: rightWeight, minimalSize: rightPanelMinWidth),
+        Area(weight: 0.5, minimalSize: 300),
+        Area(weight: 0.5, minimalSize: rightPanelMinWidth),
       ];
     }
 
     // 更新提交详情控制器
     if (_commitDetailController != null) {
-      // 根据屏幕宽度调整左右比例（与工作区控制器保持一致）
-      double historyWeight = 0.5;
-      double detailWeight = 0.5;
-
-      if (newSize.width < 1000) {
-        // 小屏幕时，让历史区域更窄（与工作区控制器保持一致）
-        historyWeight = 0.4;
-        detailWeight = 0.6;
-      } else if (newSize.width > 1600) {
-        // 大屏幕时，让历史区域更宽（与工作区控制器保持一致）
-        historyWeight = 0.55;
-        detailWeight = 0.45;
-      }
-
       _commitDetailController!.areas = [
-        Area(weight: historyWeight, minimalSize: 300), // 提交历史
-        Area(weight: detailWeight, minimalSize: rightPanelMinWidth),  // 提交详情（使用统一的最小宽度）
+        Area(weight: 0.5, minimalSize: 300), // 提交历史
+        Area(weight: 0.5, minimalSize: rightPanelMinWidth),  // 提交详情
       ];
     }
   }
@@ -614,7 +584,6 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
                 _isFirstLayoutDone = true;
               }
 
-
               final state = snapshot.data!;
 
               if (!_controllersInitialized || _mainController == null) {
@@ -623,7 +592,6 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
               return LayoutBuilder(
             builder: (context, constraints) {
-              // 确保控制器已初始化并适应当前尺寸
               if (_controllersInitialized && constraints.maxWidth > 0) {
                 final currentSize = Size(constraints.maxWidth, constraints.maxHeight);
                 if (_mediaQuery.size != currentSize) {
@@ -685,7 +653,6 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
           CommitHistoryView(
             commits: state.commits,
             onCommitSelected: _onCommitSelected,
-            // --- 传递 Cherry-pick 回调 ---
             onCherryPick: _handleCherryPick,
           ),
         StagingAreaView(
@@ -695,6 +662,7 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
           onFileSelected: _onFileSelectedInWorkingCopy,
           onCommit: _handleCommit,
           selectedFile: _activeDiffFile,
+          onRefreshFileStatus: _updateFileStatus,
         ),
       ],
     );
@@ -709,7 +677,6 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
       axis: Axis.horizontal,
       controller: _commitDetailController!,
       children: [
-        // 提交历史区域，使用IndexedStack来支持差异视图的覆盖
         IndexedStack(
           index: _selectedCommitFileDiff != null ? 1 : 0,
           children: [
@@ -717,7 +684,6 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
               commits: state.commits,
               onCommitSelected: _onCommitSelected,
               selectedCommit: commit,
-              // --- 传递 Cherry-pick 回调 ---
               onCherryPick: _handleCherryPick,
             ),
             if (_selectedCommitFileDiff != null)
@@ -818,7 +784,7 @@ class RepoActionsToolbar extends StatelessWidget {
           const SizedBox(width: 8),
           TextButton.icon(
             icon: const Icon(Icons.inventory_2_outlined, size: 16),
-            label: const Text('暂存（Stash）'),
+            label: const Text('储藏（Stash）'),
             onPressed: isLoading ? null : onNavigateToStashes,
             style: TextButton.styleFrom(
               foregroundColor: Colors.white,
@@ -843,243 +809,5 @@ class RepoActionsToolbar extends StatelessWidget {
   }
 }
 
-
-class NonGitRepositoryView extends StatelessWidget {
-  final String repoPath;
-  final VoidCallback onInit;
-
-  const NonGitRepositoryView({
-    super.key,
-    required this.repoPath,
-    required this.onInit,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.info_outline, size: 48, color: Colors.amber),
-          const SizedBox(height: 16),
-          Text('此目录不是一个 Git 仓库', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Text(repoPath, style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            icon: const Icon(Icons.add),
-            label: const Text('初始化仓库'),
-            onPressed: onInit,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class FileDiffView extends StatefulWidget {
-  final GitService gitService;
-  final List<GitFileStatus> allFiles;
-  final GitFileStatus initialFile;
-  final VoidCallback onClose;
-  final ValueChanged<GitFileStatus> onFileChanged;
-
-  const FileDiffView({
-    super.key,
-    required this.gitService,
-    required this.allFiles,
-    required this.initialFile,
-    required this.onClose,
-    required this.onFileChanged,
-  });
-
-  @override
-  State<FileDiffView> createState() => _FileDiffViewState();
-}
-
-class _FileDiffViewState extends State<FileDiffView> {
-  late GitFileStatus _currentFile;
-  late Future<String> _diffFuture;
-  final FocusNode _focusNode = FocusNode();
-
-  @override
-  void initState() {
-    super.initState();
-    _currentFile = widget.initialFile;
-    _loadDiff();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      FocusScope.of(context).requestFocus(_focusNode);
-    });
-  }
-
-  @override
-  void dispose() {
-    _focusNode.dispose();
-    super.dispose();
-  }
-  
-  // 当外部传入的文件变化时，也需要更新
-  @override
-  void didUpdateWidget(covariant FileDiffView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.initialFile != oldWidget.initialFile) {
-      setState(() {
-        _currentFile = widget.initialFile;
-        _loadDiff();
-      });
-    }
-  }
-
-
-  void _loadDiff() {
-    setState(() {
-      _diffFuture = widget.gitService.getDiff(
-        _currentFile.path,
-        isStaged: _currentFile.isStaged,
-      );
-    });
-  }
-
-  void _handleKeyEvent(KeyEvent event) {
-    if (event is KeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        _navigateToFile(-1);
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        _navigateToFile(1);
-      }
-    }
-  }
-
-  void _navigateToFile(int direction) {
-    final currentIndex = widget.allFiles.indexWhere((file) =>
-    file.path == _currentFile.path && file.isStaged == _currentFile.isStaged);
-    if (currentIndex != -1) {
-      int nextIndex = currentIndex + direction;
-      if (nextIndex >= 0 && nextIndex < widget.allFiles.length) {
-        // 使用回调通知父组件文件已更改
-        widget.onFileChanged(widget.allFiles[nextIndex]);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _focusNode,
-      onKeyEvent: (node, event) {
-        _handleKeyEvent(event);
-        return KeyEventResult.handled;
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            height: 48,
-            color: Theme.of(context).scaffoldBackgroundColor.withOpacity(0.5),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '变更: ${_currentFile.path}',
-                    style: const TextStyle(fontSize: 14),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  tooltip: '返回提交历史 (Esc)',
-                  onPressed: widget.onClose,
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: FutureBuilder<String>(
-              future: _diffFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Text('加载差异失败: ${snapshot.error}'),
-                    ),
-
-                  );
-                }
-                final diffData = snapshot.data ?? '没有检测到差异。';
-                final extension = _currentFile.path.contains('.')
-                    ? _currentFile.path.split('.').last
-                    : '';
-
-                return DiffView(
-                  diffData: diffData,
-                  fileExtension: extension,
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class CommitFileDiffView extends StatelessWidget {
-  final GitFileDiff fileDiff;
-  final VoidCallback onClose;
-
-  const CommitFileDiffView({
-    super.key,
-    required this.fileDiff,
-    required this.onClose,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final pathParts = fileDiff.path.split('/');
-    final fileName = pathParts.last;
-    final extension = fileName.contains('.') ? fileName.split('.').last : '';
-
-    return Material(
-      color: Theme.of(context).scaffoldBackgroundColor,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            height: 48,
-            color: Theme.of(context).appBarTheme.backgroundColor?.withOpacity(0.5),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '文件差异: ${fileDiff.path}',
-                    style: const TextStyle(fontSize: 14),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  tooltip: '关闭差异视图',
-                  onPressed: onClose,
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: DiffView(
-              diffData: fileDiff.diffContent,
-              fileExtension: extension,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// (其他辅助 Widget 保持不变)
+// ... NonGitRepositoryView, FileDiffView, CommitFileDiffView ...
