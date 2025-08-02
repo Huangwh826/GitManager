@@ -12,7 +12,10 @@ import 'widgets/branch_list_view.dart';
 import 'widgets/diff_view.dart';
 import 'widgets/commit_history_view.dart';
 import 'widgets/staging_area_view.dart';
-import 'widgets/commit_detail_view.dart'; // 新增引入
+import 'widgets/commit_detail_view.dart';
+import 'widgets/conflict_resolver_view.dart';
+import 'widgets/stash_management_view.dart';
+import 'widgets/remote_repository_view.dart';
 
 void main() {
   runApp(
@@ -84,17 +87,21 @@ class _MainScreenState extends State<MainScreen> {
           },
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => repoService.addRepository(),
-            tooltip: '添加本地仓库',
-          ),
-          const VerticalDivider(),
-          _buildActionButton(Icons.download, '抓取', () => _repoDetailViewKey.currentState?._handleFetch()),
-          _buildActionButton(Icons.sync_alt, '拉取', () => _repoDetailViewKey.currentState?._handlePull()),
-          _buildActionButton(Icons.upload, '推送', () => _repoDetailViewKey.currentState?._handlePush()),
-          const SizedBox(width: 16),
-        ],
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () => repoService.addRepository(),
+              tooltip: '添加本地仓库',
+            ),
+            const VerticalDivider(),
+            _buildActionButton(Icons.download, '抓取', () => _repoDetailViewKey.currentState?._handleFetch()),
+            _buildActionButton(Icons.sync_alt, '拉取', () => _repoDetailViewKey.currentState?._handlePull()),
+            _buildActionButton(Icons.upload, '推送', () => _repoDetailViewKey.currentState?._handlePush()),
+            const VerticalDivider(),
+            _buildActionButton(Icons.merge_type, '冲突解决', _navigateToConflictResolver),
+            _buildActionButton(Icons.archive, 'Stash管理', _navigateToStashManagement),
+            _buildActionButton(Icons.link, '远程仓库', _navigateToRemoteRepository),
+            const SizedBox(width: 16),
+          ],
       ),
       body: selectedRepoPath == null
           ? const Center(child: Text('请通过右上角 "+" 添加一个仓库'))
@@ -111,6 +118,27 @@ class _MainScreenState extends State<MainScreen> {
       icon: Icon(icon, size: 16),
       label: Text(label),
       style: TextButton.styleFrom(foregroundColor: Colors.grey[300]),
+    );
+  }
+
+  void _navigateToConflictResolver() {
+    Navigator.push(
+      context, 
+      MaterialPageRoute(builder: (context) => const ConflictResolverView())
+    );
+  }
+
+  void _navigateToStashManagement() {
+    Navigator.push(
+      context, 
+      MaterialPageRoute(builder: (context) => const StashManagementView())
+    );
+  }
+
+  void _navigateToRemoteRepository() {
+    Navigator.push(
+      context, 
+      MaterialPageRoute(builder: (context) => const RemoteRepositoryView())
     );
   }
 }

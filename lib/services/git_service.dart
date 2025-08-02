@@ -184,6 +184,161 @@ class GitService {
     await _runGitCommand(['checkout', '-b', branchName]);
   }
 
+  /// 获取所有远程仓库
+  Future<List<RemoteRepository>> getRemotes() async {
+    final result = await _runGitCommand(['remote', '-v']);
+    final List<RemoteRepository> remotes = [];
+    final lines = result.stdout.toString().split('\n');
+    final Map<String, String> remoteUrls = {};
+
+    for (var line in lines) {
+      if (line.isEmpty) continue;
+      final parts = line.split('\t');
+      if (parts.length < 2) continue;
+      final name = parts[0];
+      final url = parts[1].split(' ')[0];
+      remoteUrls[name] = url;
+    }
+
+    remoteUrls.forEach((name, url) {
+      remotes.add(RemoteRepository(name: name, url: url));
+    });
+
+    return remotes;
+  }
+
+  /// 添加远程仓库
+  Future<void> addRemote(String name, String url) async {
+    if (name.trim().isEmpty || url.trim().isEmpty) {
+      throw GitCommandException('远程仓库名称和URL不能为空。');
+    }
+    await _runGitCommand(['remote', 'add', name, url]);
+  }
+
+  /// 删除远程仓库
+  Future<void> removeRemote(String name) async {
+    if (name.trim().isEmpty) throw GitCommandException('远程仓库名称不能为空。');
+    await _runGitCommand(['remote', 'remove', name]);
+  }
+
+  /// 更新远程仓库URL
+  Future<void> setRemoteUrl(String name, String newUrl) async {
+    if (name.trim().isEmpty || newUrl.trim().isEmpty) {
+      throw GitCommandException('远程仓库名称和URL不能为空。');
+    }
+    await _runGitCommand(['remote', 'set-url', name, newUrl]);
+  }
+
+  /// 存储当前工作区的变更 (已修复)
+  Future<void> stash(String message) async {
+    // 使用 'push' 代替过时的 'save'，并使用 -m 标志来添加消息
+    if (message.trim().isEmpty) {
+      await _runGitCommand(['stash', 'push']);
+    } else {
+      await _runGitCommand(['stash', 'push', '-m', message]);
+    }
+  }
+
+  /// 列出所有stash (已修复)
+  Future<List<GitStash>> getStashes() async {
+    // 使用 `git log -g refs/stashes` 来获取详细的 stash 信息
+    // 使用一个几乎不可能出现在提交信息中的分隔符
+    const String separator = '<<stash_entry_separator>>';
+    // 格式: refName|authorName|authorDateRelative|message
+    const String format = '%gd|%an|%ar|%s$separator';
+    final result = await _runGitCommand(['log', '-g', 'refs/stashes', '--pretty=format:$format'], throwOnError: false);
+
+    final List<GitStash> stashes = [];
+    if (result.stdout.toString().isEmpty) {
+      return stashes;
+    }
+
+    final stashStrings = result.stdout.toString().split(separator);
+
+    for (var stashString in stashStrings) {
+      if (stashString.trim().isEmpty) continue;
+
+      // 使用'|'作为分隔符进行分割
+      final parts = stashString.trim().split('|');
+      if (parts.length >= 4) {
+        final ref = parts[0].trim();       // 例如: stash@{0}
+        final author = parts[1].trim();
+        final date = parts[2].trim();
+        // 消息可能是多部分，合并剩余部分
+        final message = parts.sublist(3).join('|').trim();
+
+        stashes.add(GitStash(
+          // 根据模型和视图的使用情况，name 和 ref 都设置为 stash 的引用
+          name: ref,
+          ref: ref,
+          author: author,
+          date: date,
+          message: message,
+        ));
+      }
+    }
+    return stashes;
+  }
+
+
+  /// 应用指定的stash
+  Future<void> applyStash(String stashRef) async {
+    await _runGitCommand(['stash', 'apply', stashRef]);
+  }
+
+  /// 删除指定的stash
+  Future<void> dropStash(String stashRef) async {
+    await _runGitCommand(['stash', 'drop', stashRef]);
+  }
+
+  /// cherry-pick指定的提交
+  Future<void> cherryPick(String commitHash) async {
+    await _runGitCommand(['cherry-pick', commitHash]);
+  }
+
+  // 合并冲突解决功能已移至下面的resolveConflict方法
+  /// 中止合并
+  Future<void> abortMerge() async {
+    await _runGitCommand(['merge', '--abort']);
+  }
+
+  // 获取所有冲突文件
+  Future<List<String>> getConflictFiles() async {
+    final result = await _runGitCommand(['diff', '--name-only', '--diff-filter=U']);
+    return result.stdout.toString().split('\n').where((file) => file.isNotEmpty).toList();
+  }
+
+  // 获取包含冲突的文件内容
+  Future<String?> getFileWithConflicts(String filePath) async {
+    try {
+      final file = File('$repoPath/$filePath');
+      if (!file.existsSync()) {
+        throw Exception('文件不存在: $filePath');
+      }
+      return await file.readAsString();
+    } catch (e) {
+      print('读取冲突文件失败: $e');
+      throw e;
+    }
+  }
+
+  // 解决冲突
+  // 解决冲突并将文件添加到暂存区
+  Future<void> resolveConflict(String filePath, String resolvedContent) async {
+    try {
+      final file = File('$repoPath/$filePath');
+      if (!file.existsSync()) {
+        throw Exception('文件不存在: $filePath');
+      }
+      await file.writeAsString(resolvedContent);
+      // 将解决后的文件添加到暂存区
+      await _runGitCommand(['add', filePath]);
+    } catch (e) {
+      print('解决冲突失败: $e');
+      throw e;
+    }
+  }
+
   /// 获取单次提交的详细信息。
   Future<GitCommitDetail> getCommitDetails(String hash) async {
     final result = await _runGitCommand(['show', hash, '--patch-with-stat', '--pretty=fuller']);
