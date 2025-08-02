@@ -15,6 +15,12 @@ import 'widgets/staging_area_view.dart';
 import 'widgets/commit_detail_view.dart';
 import 'widgets/window_title_bar.dart';
 
+// --- 新增导入 ---
+import 'widgets/remote_repository_view.dart';
+import 'widgets/stash_management_view.dart';
+import 'widgets/conflict_resolver_view.dart';
+
+
 void main() {
   // 确保Flutter绑定已初始化
   WidgetsFlutterBinding.ensureInitialized();
@@ -231,7 +237,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           ? TabBarView(
         controller: _tabController!,
         children: repos
-            .map((path) => RepositoryDetailView(repoPath: path))
+            .map((path) => RepositoryDetailView(key: ValueKey(path), repoPath: path)) // 使用 ValueKey 保证重建
             .toList(),
       )
           : const Center(child: CircularProgressIndicator())),
@@ -261,10 +267,11 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   MultiSplitViewController? _workingCopyController;
   MultiSplitViewController? _commitDetailController;
 
-  // 不再需要单独的状态变量，使用实时计算
-
   bool _controllersInitialized = false;
   bool _isFirstLayoutDone = false;
+
+  // --- 新增状态：用于跟踪冲突文件 ---
+  List<String> _conflictFiles = [];
 
   @override
   void initState() {
@@ -309,8 +316,6 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
       ],
     );
 
-
-
     _controllersInitialized = true;
   }
 
@@ -321,8 +326,6 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
     _commitDetailController?.dispose();
     super.dispose();
   }
-
-
 
   void _handleError(dynamic error) {
     if (!mounted) return;
@@ -344,7 +347,11 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   void _refreshAll() {
     setState(() {
       _isFirstLayoutDone = false;
+      // 在获取仓库状态的同时，检查冲突文件
       _repoStateFuture = _gitService.getFullRepoState();
+      _gitService.getConflictFiles().then((files) {
+        if(mounted) setState(() => _conflictFiles = files);
+      });
       _activeDiffFile = null;
       _selectedCommit = null;
       _selectedCommitFileDiff = null;
@@ -409,6 +416,30 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
         () => _gitService.createBranch(branchName).then((_) => _refreshAll()),
     successMessage: '已创建并切换到新分支 $branchName',
   );
+  
+  // --- 新增 Cherry-pick 处理函数 ---
+  Future<void> _handleCherryPick(GitCommit commit) async {
+    // 弹出一个确认对话框
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认 Cherry-pick'),
+        content: Text('您确定要 cherry-pick 这个提交吗？\n\n${commit.shortHash} - ${commit.message.split('\n').first}'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('确认')),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _runGitAction(
+            () => _gitService.cherryPick(commit.hash).then((_) => _refreshAll()),
+        successMessage: '已 cherry-pick 提交: ${commit.shortHash}',
+      );
+    }
+  }
+
 
   void _onFileSelectedInWorkingCopy(GitFileStatus file) {
     setState(() {
@@ -438,16 +469,36 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
       _selectedCommitFileDiff = file;
     });
   }
+  
+  // --- 新增：导航到新页面的方法 ---
+  void _navigateToRemoteManagement() {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RemoteRepositoryView()));
+  }
+
+  void _navigateToStashManagement() {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StashManagementView()));
+  }
+
+  void _navigateToConflictResolver() {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConflictResolverView()))
+        .then((_) => _refreshAll()); // 解决冲突后刷新状态
+  }
+
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // --- 核心修改：将导航函数和冲突状态传递给工具栏 ---
         RepoActionsToolbar(
           isLoading: _isLoadingAction,
           onFetch: _handleFetch,
           onPull: _handlePull,
           onPush: _handlePush,
+          onNavigateToRemotes: _navigateToRemoteManagement,
+          onNavigateToStashes: _navigateToStashManagement,
+          onNavigateToConflictResolver: _navigateToConflictResolver,
+          hasConflicts: _conflictFiles.isNotEmpty,
         ),
         const Divider(height: 1),
         Expanded(
@@ -542,6 +593,8 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
           CommitHistoryView(
             commits: state.commits,
             onCommitSelected: _onCommitSelected,
+            // --- 传递 Cherry-pick 回调 ---
+            onCherryPick: _handleCherryPick,
           ),
         StagingAreaView(
           allFiles: state.fileStatus,
@@ -572,6 +625,8 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
               commits: state.commits,
               onCommitSelected: _onCommitSelected,
               selectedCommit: commit,
+              // --- 传递 Cherry-pick 回调 ---
+              onCherryPick: _handleCherryPick,
             ),
             if (_selectedCommitFileDiff != null)
               CommitFileDiffView(
@@ -598,11 +653,16 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   }
 }
 
+// --- 核心修改：扩展工具栏以包含新功能 ---
 class RepoActionsToolbar extends StatelessWidget {
   final bool isLoading;
   final VoidCallback onFetch;
   final VoidCallback onPull;
   final VoidCallback onPush;
+  final VoidCallback onNavigateToRemotes;
+  final VoidCallback onNavigateToStashes;
+  final VoidCallback onNavigateToConflictResolver;
+  final bool hasConflicts;
 
   const RepoActionsToolbar({
     super.key,
@@ -610,6 +670,10 @@ class RepoActionsToolbar extends StatelessWidget {
     required this.onFetch,
     required this.onPull,
     required this.onPush,
+    required this.onNavigateToRemotes,
+    required this.onNavigateToStashes,
+    required this.onNavigateToConflictResolver,
+    required this.hasConflicts,
   });
 
   @override
@@ -648,6 +712,39 @@ class RepoActionsToolbar extends StatelessWidget {
               disabledForegroundColor: Colors.grey,
             ),
           ),
+          const VerticalDivider(width: 24),
+          // --- 新增按钮 ---
+          TextButton.icon(
+            icon: const Icon(Icons.public, size: 16),
+            label: const Text('远程'),
+            onPressed: isLoading ? null : onNavigateToRemotes,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              disabledForegroundColor: Colors.grey,
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton.icon(
+            icon: const Icon(Icons.inventory_2_outlined, size: 16),
+            label: const Text('Stash'),
+            onPressed: isLoading ? null : onNavigateToStashes,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              disabledForegroundColor: Colors.grey,
+            ),
+          ),
+          const Spacer(), // 将冲突按钮推到右侧
+          // --- 条件显示的冲突解决按钮 ---
+          if (hasConflicts)
+            FilledButton.icon(
+              icon: const Icon(Icons.warning_amber, size: 16),
+              label: const Text('解决冲突'),
+              onPressed: isLoading ? null : onNavigateToConflictResolver,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.amber,
+                foregroundColor: Colors.black,
+              ),
+            ),
         ],
       ),
     );
@@ -728,12 +825,27 @@ class _FileDiffViewState extends State<FileDiffView> {
     _focusNode.dispose();
     super.dispose();
   }
+  
+  // 当外部传入的文件变化时，也需要更新
+  @override
+  void didUpdateWidget(covariant FileDiffView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialFile != oldWidget.initialFile) {
+      setState(() {
+        _currentFile = widget.initialFile;
+        _loadDiff();
+      });
+    }
+  }
+
 
   void _loadDiff() {
-    _diffFuture = widget.gitService.getDiff(
-      _currentFile.path,
-      isStaged: _currentFile.isStaged,
-    );
+    setState(() {
+      _diffFuture = widget.gitService.getDiff(
+        _currentFile.path,
+        isStaged: _currentFile.isStaged,
+      );
+    });
   }
 
   void _handleKeyEvent(KeyEvent event) {
@@ -752,11 +864,8 @@ class _FileDiffViewState extends State<FileDiffView> {
     if (currentIndex != -1) {
       int nextIndex = currentIndex + direction;
       if (nextIndex >= 0 && nextIndex < widget.allFiles.length) {
-        setState(() {
-          _currentFile = widget.allFiles[nextIndex];
-          _loadDiff();
-          widget.onFileChanged(_currentFile);
-        });
+        // 使用回调通知父组件文件已更改
+        widget.onFileChanged(widget.allFiles[nextIndex]);
       }
     }
   }
@@ -809,7 +918,15 @@ class _FileDiffViewState extends State<FileDiffView> {
                     ),
                   );
                 }
-                return DiffView(diffData: snapshot.data ?? '没有检测到差异。');
+                final diffData = snapshot.data ?? '没有检测到差异。';
+                final extension = _currentFile.path.contains('.')
+                    ? _currentFile.path.split('.').last
+                    : '';
+
+                return DiffView(
+                  diffData: diffData,
+                  fileExtension: extension,
+                );
               },
             ),
           ),

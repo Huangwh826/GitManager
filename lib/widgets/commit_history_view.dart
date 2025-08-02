@@ -7,12 +7,15 @@ import '../models/git_models.dart';
 class CommitHistoryView extends StatelessWidget {
   final List<GitCommit> commits;
   final Function(GitCommit) onCommitSelected;
+  // --- 新增回调 ---
+  final Function(GitCommit) onCherryPick;
   final GitCommit? selectedCommit;
 
   const CommitHistoryView({
     super.key,
     required this.commits,
     required this.onCommitSelected,
+    required this.onCherryPick, // --- 新增回调 ---
     this.selectedCommit,
   });
 
@@ -37,6 +40,8 @@ class CommitHistoryView extends StatelessWidget {
                 commit: commit,
                 isSelected: selectedCommit?.hash == commit.hash,
                 onTap: () => onCommitSelected(commit),
+                // --- 传递回调 ---
+                onCherryPick: () => onCherryPick(commit),
               );
             },
           ),
@@ -50,12 +55,15 @@ class CommitHistoryView extends StatelessWidget {
 class CommitListItem extends StatelessWidget {
   final GitCommit commit;
   final VoidCallback onTap;
+  // --- 新增回调 ---
+  final VoidCallback onCherryPick;
   final bool isSelected;
 
   const CommitListItem({
     super.key,
     required this.commit,
     required this.onTap,
+    required this.onCherryPick, // --- 新增回调 ---
     required this.isSelected,
   });
 
@@ -106,7 +114,6 @@ class CommitListItem extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
-                  // --- 核心修正部分 ---
                   Row(
                     children: [
                       Expanded(
@@ -119,21 +126,36 @@ class CommitListItem extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      // 为哈希值设置一个最小宽度，但允许它被压缩
                       Flexible(
                         child: Text(
                           commit.shortHash,
                           style: TextStyle(fontFamily: 'monospace', color: Colors.grey[600], fontSize: 12),
-                          overflow: TextOverflow.clip, // 空间不够时直接裁剪
+                          overflow: TextOverflow.clip,
                           softWrap: false,
                         ),
                       ),
                     ],
                   ),
-                  // --- 修正结束 ---
                 ],
               ),
             ),
+            // --- 核心修改：添加PopupMenuButton ---
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'cherry-pick') {
+                  onCherryPick();
+                }
+              },
+              itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                const PopupMenuItem<String>(
+                  value: 'cherry-pick',
+                  child: Text('Cherry-pick 此提交'),
+                ),
+              ],
+              icon: const Icon(Icons.more_vert, size: 18),
+              tooltip: '更多操作',
+            ),
+            // --- 修改结束 ---
           ],
         ),
       ),
