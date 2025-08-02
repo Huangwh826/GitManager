@@ -190,14 +190,27 @@ class GitService {
     final output = result.stdout.toString();
 
     String author = '', authorDate = '', committer = '', commitDate = '', message = '';
+    String authorEmail = '', committerEmail = '';
+    final List<String> parents = [];
     final lines = output.split('\n');
     int lineIndex = 0;
     while(lineIndex < lines.length) {
       final line = lines[lineIndex];
-      if (line.startsWith('Author:')) author = line.substring(8).trim();
+      if (line.startsWith('Author:')) {
+        final authorMatch = RegExp(r'Author: (.*) <(.*)>').firstMatch(line);
+        author = authorMatch?.group(1)?.trim() ?? line.substring(8).trim();
+        authorEmail = authorMatch?.group(2)?.trim() ?? '';
+      }
       if (line.startsWith('AuthorDate:')) authorDate = line.substring(12).trim();
-      if (line.startsWith('Commit:')) committer = line.substring(8).trim();
+      if (line.startsWith('Commit:')) {
+        final committerMatch = RegExp(r'Commit: (.*) <(.*)>').firstMatch(line);
+        committer = committerMatch?.group(1)?.trim() ?? line.substring(8).trim();
+        committerEmail = committerMatch?.group(2)?.trim() ?? authorEmail;
+      }
       if (line.startsWith('CommitDate:')) commitDate = line.substring(12).trim();
+      if (line.startsWith('parent ')) {
+        parents.add(line.substring('parent '.length).trim());
+      }
       if (line.isEmpty) { lineIndex++; break; }
       lineIndex++;
     }
@@ -221,11 +234,55 @@ class GitService {
       final pathLine = diffLines.first;
       final path = pathLine.split(' b/').last.trim();
       GitFileStatusType type = GitFileStatusType.modified;
-      if (diffBlock.contains('new file mode')) type = GitFileStatusType.added;
-      else if (diffBlock.contains('deleted file mode')) type = GitFileStatusType.deleted;
-      else if (diffBlock.startsWith('rename from')) type = GitFileStatusType.renamed;
+      int additions = 0;
+      int deletions = 0;
 
-      files.add(GitFileDiff(path: path, type: type, diffContent: 'diff --git $diffBlock'));
+      // 确定文件变更类型
+      if (diffBlock.contains('new file mode')) {
+        type = GitFileStatusType.added;
+      } else if (diffBlock.contains('deleted file mode')) {
+        type = GitFileStatusType.deleted;
+      } else if (diffBlock.startsWith('rename from')) {
+        type = GitFileStatusType.renamed;
+      }
+
+      // 解析变更统计信息
+      final statLine = diffLines.lastWhere((line) => line.contains('+') && line.contains('-'), orElse: () => '');
+      if (statLine.isNotEmpty) {
+        final RegExp regExp = RegExp(r'(\d+) insertion.* (\d+) deletion');
+        final match = regExp.firstMatch(statLine);
+        if (match != null) {
+          additions = int.tryParse(match.group(1)!) ?? 0;
+          deletions = int.tryParse(match.group(2)!) ?? 0;
+        } else {
+          // 处理只有新增或只有删除的情况
+          if (statLine.contains('insertion')) {
+            final RegExp addRegExp = RegExp(r'(\d+) insertion');
+            final addMatch = addRegExp.firstMatch(statLine);
+            additions = addMatch != null ? int.tryParse(addMatch.group(1)!) ?? 0 : 0;
+          } else if (statLine.contains('deletion')) {
+            final RegExp delRegExp = RegExp(r'(\d+) deletion');
+            final delMatch = delRegExp.firstMatch(statLine);
+            deletions = delMatch != null ? int.tryParse(delMatch.group(1)!) ?? 0 : 0;
+          }
+        }
+      }
+
+      files.add(GitFileDiff(
+        path: path,
+        type: type,
+        diffContent: 'diff --git $diffBlock',
+        additions: additions,
+        deletions: deletions,
+      ));
+    }
+
+    // 计算总插入和删除行数
+    int insertions = 0;
+    int deletions = 0;
+    for (final file in files) {
+      insertions += file.additions;
+      deletions += file.deletions;
     }
 
     return GitCommitDetail(
@@ -236,6 +293,10 @@ class GitService {
       committer: committer,
       committerDate: commitDate,
       files: files,
+      authorEmail: authorEmail,
+      parents: parents,
+      insertions: insertions,
+      deletions: deletions,
     );
   }
 }

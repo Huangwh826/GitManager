@@ -28,7 +28,10 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_PATCH=${FLUTT
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTTER_VERSION_BUILD}")
 
 # Disable Windows macros that collide with C++ standard library functions.
-target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
+ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
+
+# 禁用警告C4819（文件包含不能在当前代码页中表示的字符）
+ target_compile_options(${BINARY_NAME} PRIVATE "/wd4819")
 
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.

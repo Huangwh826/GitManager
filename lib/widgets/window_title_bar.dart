@@ -10,12 +10,14 @@ class WindowTitleBar extends StatelessWidget implements PreferredSizeWidget {
   final TabController? tabController;
   final List<String> repositoryPaths;
   final VoidCallback onAddRepository;
+  final Function(int) onCloseRepository;
 
   const WindowTitleBar({
     super.key,
     required this.tabController,
     required this.repositoryPaths,
     required this.onAddRepository,
+    required this.onCloseRepository,
   });
 
   @override
@@ -44,7 +46,9 @@ class WindowTitleBar extends StatelessWidget implements PreferredSizeWidget {
                         indicatorPadding: const EdgeInsets.symmetric(horizontal: 4),
                         indicatorColor: Colors.blueAccent,
                         tabs: repositoryPaths
-                            .map((path) => Tab(text: path.split(Platform.isWindows ? '\\' : '/').last))
+                            .asMap()
+                            .entries
+                            .map((entry) => _buildTab(context, entry.key, entry.value))
                             .toList(),
                       ),
                     )
@@ -63,6 +67,40 @@ class WindowTitleBar extends StatelessWidget implements PreferredSizeWidget {
           // 右侧的窗口控制按钮
           const WindowButtons(),
         ],
+      ),
+    );
+  }
+
+  /// 构建自定义标签组件
+  Widget _buildTab(BuildContext context, int index, String path) {
+    final fileName = path.split(Platform.isWindows ? '\\' : '/').last;
+    final isActive = tabController?.index == index;
+
+    return Tooltip(
+      message: path, // 显示完整路径作为悬停提示
+      child: Container(
+        height: preferredSize.height,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Row(
+          children: [
+            // 标签文本
+            Text(
+              fileName,
+              style: TextStyle(
+                color: isActive ? Colors.white : Colors.grey,
+                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+            // 关闭按钮
+            IconButton(
+              icon: const Icon(Icons.close, size: 14),
+              onPressed: () => onCloseRepository(index),
+              splashRadius: 14,
+              padding: EdgeInsets.zero,
+              tooltip: '关闭此仓库',
+            ),
+          ],
+        ),
       ),
     );
   }

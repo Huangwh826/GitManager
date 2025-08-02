@@ -68,11 +68,31 @@ class GitFileDiff {
   final String path;
   final GitFileStatusType type;
   final String diffContent;
+  final int additions;
+  final int deletions;
+
+  // 提供一个便捷获取状态字符串的属性
+  String get status {
+    switch (type) {
+      case GitFileStatusType.added:
+        return 'added';
+      case GitFileStatusType.modified:
+        return 'modified';
+      case GitFileStatusType.deleted:
+        return 'deleted';
+      case GitFileStatusType.renamed:
+        return 'renamed';
+      default:
+        return 'unknown';
+    }
+  }
 
   GitFileDiff({
     required this.path,
     required this.type,
     required this.diffContent,
+    this.additions = 0,
+    this.deletions = 0,
   });
 }
 
@@ -81,6 +101,10 @@ class GitCommitDetail extends GitCommit {
   final String committer;
   final String committerDate;
   final List<GitFileDiff> files;
+  final String authorEmail;
+  final List<String> parents;
+  final int insertions;
+  final int deletions;
 
   GitCommitDetail({
     required super.hash,
@@ -90,6 +114,10 @@ class GitCommitDetail extends GitCommit {
     required this.committer,
     required this.committerDate,
     required this.files,
+    required this.authorEmail,
+    required this.parents,
+    required this.insertions,
+    required this.deletions,
   });
 }
 // --- 新增部分结束 ---

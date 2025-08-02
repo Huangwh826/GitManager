@@ -3,8 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'dart:io';
 import 'package:multi_split_view/multi_split_view.dart';
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'services/repository_service.dart';
 import 'services/git_service.dart';
 import 'models/git_models.dart';
@@ -13,8 +13,22 @@ import 'widgets/diff_view.dart';
 import 'widgets/commit_history_view.dart';
 import 'widgets/staging_area_view.dart';
 import 'widgets/commit_detail_view.dart';
+import 'widgets/window_title_bar.dart';
 
 void main() {
+  // 确保Flutter绑定已初始化
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // 初始化bitsdojo_window
+  doWhenWindowReady(() {
+    const initialSize = Size(1280, 720);
+    appWindow.minSize = const Size(800, 600);
+    appWindow.size = initialSize;
+    appWindow.alignment = Alignment.center;
+    appWindow.title = 'GitManager';
+    appWindow.show();
+  });
+
   runApp(
     ChangeNotifierProvider(
       create: (context) => RepositoryService(),
@@ -165,6 +179,19 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     return true;
   }
 
+  /// 关闭指定索引的仓库
+  void _closeRepository(int index, RepositoryService repoService) {
+    if (index < 0 || index >= repoService.repositoryPaths.length) return;
+
+    final removedPath = repoService.repositoryPaths[index];
+    repoService.removeRepository(removedPath);
+
+    // 如果关闭的是当前选中的仓库，且还有其他仓库，则选中第一个仓库
+    if (repoService.selectedRepositoryPath == removedPath && repoService.repositoryPaths.isNotEmpty) {
+      repoService.selectRepository(repoService.repositoryPaths.first);
+    }
+  }
+
   void _updateTabController(List<String> repos) {
     _tabController?.dispose();
     _tabController = null;
@@ -192,35 +219,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     final bool isControllerReady = _tabController != null && _tabController!.length == repos.length;
 
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        title: Row(
-          children: [
-            Expanded(
-              child: (repos.isNotEmpty && isControllerReady)
-                  ? TabBar(
-                controller: _tabController,
-                isScrollable: true,
-                tabs: repos
-                    .map((path) => Tab(
-                  text: path.split(Platform.pathSeparator).last,
-                ))
-                    .toList(),
-              )
-                  : (repos.isEmpty
-                  ? const Padding(
-                padding: EdgeInsets.only(left: 16.0),
-                child: Text('GitManager'),
-              )
-                  : const SizedBox()),
-            ),
-            IconButton(
-              icon: const Icon(Icons.add),
-              onPressed: () => repoService.addRepository(),
-              tooltip: '添加本地仓库',
-            ),
-          ],
-        ),
+      appBar: WindowTitleBar(
+        tabController: _tabController,
+        repositoryPaths: repos,
+        onAddRepository: () => repoService.addRepository(),
+        onCloseRepository: (index) => _closeRepository(index, repoService),
       ),
       body: repos.isEmpty
           ? const Center(child: Text('请通过右上角 "+" 添加一个仓库'))
@@ -252,9 +255,13 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   bool _isLoadingAction = false;
   GitCommit? _selectedCommit;
 
+  GitFileDiff? _selectedCommitFileDiff;
+
   MultiSplitViewController? _mainController;
   MultiSplitViewController? _workingCopyController;
   MultiSplitViewController? _commitDetailController;
+
+  // 不再需要单独的状态变量，使用实时计算
 
   bool _controllersInitialized = false;
   bool _isFirstLayoutDone = false;
@@ -297,10 +304,12 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
     _commitDetailController = MultiSplitViewController(
       areas: [
-        Area(weight: 0.6, minimalSize: 300),
-        Area(weight: 0.4, minimalSize: 300),
+        Area(weight: 0.4, minimalSize: 300), // 提交历史
+        Area(weight: 0.6, minimalSize: 400), // 提交详情
       ],
     );
+
+
 
     _controllersInitialized = true;
   }
@@ -312,6 +321,8 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
     _commitDetailController?.dispose();
     super.dispose();
   }
+
+
 
   void _handleError(dynamic error) {
     if (!mounted) return;
@@ -336,6 +347,7 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
       _repoStateFuture = _gitService.getFullRepoState();
       _activeDiffFile = null;
       _selectedCommit = null;
+      _selectedCommitFileDiff = null;
     });
   }
 
@@ -381,7 +393,6 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
   Future<void> _handleCommit(String message) async => _runGitAction(
         () => _gitService.commit(message).then((_) {
       _refreshAll();
-      // 提交后自动关闭差异视图
       setState(() {
         _activeDiffFile = null;
       });
@@ -407,13 +418,25 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
   void _onCommitSelected(GitCommit commit) {
     setState(() {
+      if (_selectedCommit?.hash != commit.hash) {
+        _selectedCommitFileDiff = null;
+      }
       _selectedCommit = commit;
-      _activeDiffFile = null; // 查看提交详情时，关闭文件差异视图
+      _activeDiffFile = null;
     });
   }
 
   void _onCloseCommitDetail() {
-    setState(() => _selectedCommit = null);
+    setState(() {
+      _selectedCommit = null;
+      _selectedCommitFileDiff = null;
+    });
+  }
+
+  void _onCommitFileSelected(GitFileDiff file) {
+    setState(() {
+      _selectedCommitFileDiff = file;
+    });
   }
 
   @override
@@ -437,13 +460,6 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
 
               if (snapshot.hasData && !_isFirstLayoutDone) {
                 _isFirstLayoutDone = true;
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) {
-                    _mainController?.notifyListeners();
-                    _workingCopyController?.notifyListeners();
-                    _commitDetailController?.notifyListeners();
-                  }
-                });
               }
 
               if (snapshot.hasError) {
@@ -548,22 +564,40 @@ class _RepositoryDetailViewState extends State<RepositoryDetailView> {
       axis: Axis.horizontal,
       controller: _commitDetailController!,
       children: [
-        CommitHistoryView(
-          commits: state.commits,
-          onCommitSelected: _onCommitSelected,
-          selectedCommit: commit,
+        // 提交历史区域，使用IndexedStack来支持差异视图的覆盖
+        IndexedStack(
+          index: _selectedCommitFileDiff != null ? 1 : 0,
+          children: [
+            CommitHistoryView(
+              commits: state.commits,
+              onCommitSelected: _onCommitSelected,
+              selectedCommit: commit,
+            ),
+            if (_selectedCommitFileDiff != null)
+              CommitFileDiffView(
+                key: ValueKey(_selectedCommitFileDiff!.path),
+                fileDiff: _selectedCommitFileDiff!,
+                onClose: () {
+                  setState(() {
+                    _selectedCommitFileDiff = null;
+                  });
+                },
+              ),
+          ],
         ),
         CommitDetailView(
+          key: ValueKey(commit.hash),
           commit: commit,
           gitService: _gitService,
           onClose: _onCloseCommitDetail,
+          selectedFile: _selectedCommitFileDiff,
+          onFileSelected: _onCommitFileSelected,
         ),
       ],
     );
   }
 }
 
-/// 一个包含主要 Git 操作按钮的工具栏 Widget。
 class RepoActionsToolbar extends StatelessWidget {
   final bool isLoading;
   final VoidCallback onFetch;
@@ -654,7 +688,6 @@ class NonGitRepositoryView extends StatelessWidget {
   }
 }
 
-// --- 新增 Widget：带键盘导航的文件差异视图 ---
 class FileDiffView extends StatefulWidget {
   final GitService gitService;
   final List<GitFileStatus> allFiles;
@@ -685,7 +718,6 @@ class _FileDiffViewState extends State<FileDiffView> {
     super.initState();
     _currentFile = widget.initialFile;
     _loadDiff();
-    // 请求焦点以便监听键盘事件
     WidgetsBinding.instance.addPostFrameCallback((_) {
       FocusScope.of(context).requestFocus(_focusNode);
     });
@@ -738,10 +770,8 @@ class _FileDiffViewState extends State<FileDiffView> {
         return KeyEventResult.handled;
       },
       child: Column(
-        // --- 核心修正：强制拉伸并调整 AppBar 容器 ---
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 自定义 AppBar
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             height: 48,
@@ -764,7 +794,6 @@ class _FileDiffViewState extends State<FileDiffView> {
             ),
           ),
           const Divider(height: 1),
-          // 差异内容
           Expanded(
             child: FutureBuilder<String>(
               future: _diffFuture,
@@ -782,6 +811,61 @@ class _FileDiffViewState extends State<FileDiffView> {
                 }
                 return DiffView(diffData: snapshot.data ?? '没有检测到差异。');
               },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class CommitFileDiffView extends StatelessWidget {
+  final GitFileDiff fileDiff;
+  final VoidCallback onClose;
+
+  const CommitFileDiffView({
+    super.key,
+    required this.fileDiff,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pathParts = fileDiff.path.split('/');
+    final fileName = pathParts.last;
+    final extension = fileName.contains('.') ? fileName.split('.').last : '';
+
+    return Material(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            height: 48,
+            color: Theme.of(context).appBarTheme.backgroundColor?.withOpacity(0.5),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '文件差异: ${fileDiff.path}',
+                    style: const TextStyle(fontSize: 14),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: '关闭差异视图',
+                  onPressed: onClose,
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: DiffView(
+              diffData: fileDiff.diffContent,
+              fileExtension: extension,
             ),
           ),
         ],
