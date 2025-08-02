@@ -123,6 +123,36 @@ class GitCommitDetail extends GitCommit {
 // --- 新增部分结束 ---
 
 
+// 代表一个远程仓库
+class RemoteRepository {
+  final String name;
+  final String url;
+  final bool isDefault;
+
+  RemoteRepository({
+    required this.name,
+    required this.url,
+    this.isDefault = false,
+  });
+}
+
+// 代表一个Git Stash
+class GitStash {
+  final String name;
+  final String author;
+  final String date;
+  final String message;
+  final String ref;
+
+  GitStash({
+    required this.name,
+    required this.author,
+    required this.date,
+    required this.message,
+    required this.ref,
+  });
+}
+
 // 一个聚合类，用于封装仓库详情视图所需的所有状态。
 class RepoDetailState {
   final List<GitBranch> branches;
