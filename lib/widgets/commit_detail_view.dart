@@ -221,9 +221,16 @@ class _CommitDetailViewState extends State<CommitDetailView> {
   }
 
   Widget _buildCommitMeta(BuildContext context, GitCommitDetail detail) {
-    // 格式化日期
-    final gitDateFormat = DateFormat('EEE MMM d HH:mm:ss yyyy Z', 'en_US');
-    final dateTime = gitDateFormat.parse(detail.date, true);
+    // 格式化日期 - 修复 ISO 8601 格式解析问题
+    final gitDateFormat = DateFormat('yyyy-MM-ddTHH:mm:ssZ');
+    DateTime dateTime;
+    try {
+      dateTime = gitDateFormat.parse(detail.date);
+    } catch (e) {
+      // 尝试处理可能的时区格式差异
+      final fallbackFormat = DateFormat('yyyy-MM-ddTHH:mm:ss+HH:mm');
+      dateTime = fallbackFormat.parse(detail.date);
+    }
     final dateFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
     final formattedDate = dateFormat.format(dateTime);
 

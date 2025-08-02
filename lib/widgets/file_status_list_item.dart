@@ -42,6 +42,12 @@ class FileStatusListItem extends StatelessWidget {
         color = Colors.orange;
         char = 'R';
         break;
+      // --- 核心修改：为 'unknown' 状态和默认情况提供处理逻辑 ---
+      case GitFileStatusType.unknown:
+      default:
+        color = Colors.grey;
+        char = '?';
+        break;
     }
     return Container(
       width: 20,
@@ -71,16 +77,14 @@ class FileStatusListItem extends StatelessWidget {
       dense: true,
       trailing: IconButton(
         icon: Icon(
-          fileStatus.isStaged ? Icons.remove : Icons.add,
+          fileStatus.isStaged ? Icons.remove_circle_outline : Icons.add_circle_outline,
           size: 18,
+          color: fileStatus.isStaged ? Colors.orange : Colors.green,
         ),
         tooltip: fileStatus.isStaged ? '取消暂存' : '暂存',
         onPressed: onAction,
       ),
-      // 更新 onTap 逻辑：
-      // 如果提供了 onItemTap，则整行点击时触发它。
-      // 否则，为了向后兼容，整行点击时触发 onAction。
-      onTap: onItemTap ?? onAction,
+      onTap: onItemTap,
     );
   }
 }

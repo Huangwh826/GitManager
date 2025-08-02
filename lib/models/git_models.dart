@@ -7,6 +7,7 @@ enum GitFileStatusType {
   deleted,
   renamed,
   untracked,
+  unknown, // --- 核心修改：确保 'unknown' 成员存在 ---
 }
 
 // 代表一个文件的状态
@@ -59,13 +60,12 @@ class GitBranch {
 
   String get displayName {
     if (name.startsWith('remotes/')) {
-      return name.substring(name.indexOf('/', 8) + 1);
+      final parts = name.split('/');
+      return parts.sublist(2).join('/');
     }
     return name;
   }
 }
-
-// --- 新增部分开始 ---
 
 /// 代表在一次提交中，单个文件的变更情况
 class GitFileDiff {
@@ -100,6 +100,7 @@ class GitFileDiff {
   });
 }
 
+
 /// 代表一次提交的完整详细信息
 class GitCommitDetail extends GitCommit {
   final String committer;
@@ -124,7 +125,6 @@ class GitCommitDetail extends GitCommit {
     required this.deletions,
   });
 }
-// --- 新增部分结束 ---
 
 
 // 代表一个远程仓库
